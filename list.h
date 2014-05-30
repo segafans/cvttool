@@ -16,6 +16,7 @@
 
 /*---------------------------- Type define ------------------------------*/
 typedef struct List * H_LIST;
+typedef struct ListIter * H_LIST_ITER;
 
 /*---------------------- Global variable declaration---------------------*/
 
@@ -27,10 +28,13 @@ extern "C" {
     H_LIST listNew();
     int listFree(H_LIST ptList);
     int listAdd(H_LIST ptList, void *ptItem);
-    void * listIter(H_LIST ptList);
     int listNum(H_LIST ptList);
-    int listIterClean(H_LIST ptList);
     int listDel(H_LIST ptList, void *ptItem);
+
+    H_LIST_ITER listIterNew(H_LIST ptList);
+    H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter);
+    void * listIterFetch(H_LIST_ITER ptIter);
+    int listIterFree(H_LIST_ITER ptIter);
 
 #ifdef __cplusplus
 }

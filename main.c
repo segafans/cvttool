@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
     int iRet = 0;
 
     T_InPut tInPut;
-    locInputInit(&tInPut, "f(a|b|c)*");
+    locInputInit(&tInPut, "a");
 
     H_NFA hNfa;
     hNfa = nfaNew();
