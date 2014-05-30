@@ -9,9 +9,9 @@
 /*--------------------------- Include files -----------------------------*/
 
 /*--------------------------- Macro define ------------------------------*/
-#define NFA_NODE_TYPE_START  1
-#define NFA_NODE_TYPE_END    2
-#define NFA_NODE_TYPE_NORMAL 3
+#define NFA_NODE_TYPE_START  0x1
+#define NFA_NODE_TYPE_END    0x2
+#define NFA_NODE_TYPE_NORMAL 0
 
 /*---------------------------- Type define ------------------------------*/
 typedef struct Nfa *     H_NFA;

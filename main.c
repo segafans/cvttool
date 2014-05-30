@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "nfa.h"
+#include "list.h"
 
 /*--------------------------- Macro define ------------------------------*/
 #define _DLEN_TINY_BUF  64
@@ -56,6 +57,7 @@ int main(int argc, char *argv[])
 
     iRet = locParse(hNfa, &tStruct, &tInPut);
     if (iRet != 0) {
+        nfaFree(hNfa);
         printf("locParse err[%d]", iRet);
         return -1;
     }
@@ -75,6 +77,7 @@ static int locParse(H_NFA hNfa, T_NfaStruct *ptStruct, T_InPut *ptInPut)
     T_NfaStruct tLocStruct;
     T_NfaStruct tLast;
     memset(&tLocStruct, '\0', sizeof(T_NfaStruct));
+    memset(&tLast, '\0', sizeof(T_NfaStruct));
 
     while (1) {
         char caTmp = locInputNext(ptInPut);
@@ -89,6 +92,9 @@ static int locParse(H_NFA hNfa, T_NfaStruct *ptStruct, T_InPut *ptInPut)
             locStructMerge(hNfa, ptStruct, &tLocStruct);
             memset(&tLocStruct, '\0', sizeof(T_NfaStruct));
         } else if ('*' == caTmp) {
+            if (NULL == tLast.hEnd || NULL == tLast.hStart) {
+                return 0;
+            }
             locStructSetMuti(hNfa, &tLast);
         } else {
             locStructInitKey(hNfa, &tLast, caTmp);

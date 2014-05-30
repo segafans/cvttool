@@ -20,7 +20,11 @@
 #define _TRUE   (1==1)
 #define _FLASE  (1!=1)
 
-#define debug 1
+#define _IS_START(type) _IS_STATUS((type), NFA_NODE_TYPE_START)
+#define _IS_END(type) _IS_STATUS((type), NFA_NODE_TYPE_END)
+#define _IS_STATUS(type, status) ((type) & (status))
+
+#define debug 0
 
 #define LIST_LOOP(list, fnc) \
 do { \
@@ -79,6 +83,8 @@ static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond);
 static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptDst, T_NfaNode *ptSrc);
 static int nfaNodeCheckSameToLink(H_NFA hNfa, T_NfaNode *ptNode);
 
+static int _locListHasItem(H_LIST ptList, void *ptItem);
+
 /*-------------------------  Global variable ----------------------------*/
 
 /*-------------------------  Global functions ---------------------------*/
@@ -119,7 +125,7 @@ int nfaSimple(H_NFA hNfa)
 
 H_NFA_NODE nfaNewNode(H_NFA ptNfa, int iType)
 {
-    if (NFA_NODE_TYPE_START == iType && ptNfa->ptStart != NULL) {
+    if (_IS_START(iType) && ptNfa->ptStart != NULL) {
         return NULL;
     }
 
@@ -160,9 +166,11 @@ static T_NfaNode * nfaNodeNew(int iIndex, int iType)
 {
     T_NfaNode *ptNode = (T_NfaNode *)malloc(sizeof(T_NfaNode));
     ptNode->iIndex = iIndex;
-    ptNode->iType = iType;
+    ptNode->iType = 0;
     ptNode->ptToList = listNew();
     ptNode->ptFromList = listNew();
+
+    ptNode->iType |= iType;
 
     return ptNode;
 }
@@ -185,21 +193,27 @@ static int nfaNodeDebug(T_NfaNode *ptNode)
 
 static int nfaLinkDebug(T_NfaLink *ptLink)
 {
-    char *psSrcType = "";
-    if (NFA_NODE_TYPE_START == ptLink->ptSrcNode->iType) {
-        psSrcType = "s:";
-    } else if ( NFA_NODE_TYPE_END == ptLink->ptSrcNode->iType ) {
-        psSrcType = "e:";
+    char *psSrcStart = "";
+    if (_IS_START(ptLink->ptSrcNode->iType)) {
+        psSrcStart = "s:";
     }
 
-    char *psDstType = "";
-    if (NFA_NODE_TYPE_START == ptLink->ptDstNode->iType) {
-        psDstType = "s:";
-    } else if ( NFA_NODE_TYPE_END == ptLink->ptDstNode->iType ) {
-        psDstType = "e:";
+    char *psSrcEnd = "";
+    if ( _IS_END(ptLink->ptSrcNode->iType) ) {
+        psSrcEnd = "e:";
     }
 
-    printf("[%s%d]--(%s)-->[%s%d]\n", psSrcType, ptLink->ptSrcNode->iIndex, ptLink->sKey, psDstType, ptLink->ptDstNode->iIndex);
+    char *psDstStart = "";
+    if (_IS_START(ptLink->ptDstNode->iType)) {
+        psDstStart = "s:";
+    }
+
+    char *psDstEnd = "";
+    if ( _IS_END(ptLink->ptDstNode->iType) ) {
+        psDstEnd = "e:";
+    }
+
+    printf("[%s%s%d]--(%s)-->[%s%s%d]\n", psSrcStart, psSrcEnd, ptLink->ptSrcNode->iIndex, ptLink->sKey, psDstStart, psDstEnd, ptLink->ptDstNode->iIndex);
     return 0;
 }
 
@@ -230,7 +244,7 @@ static int nfaLinkFree(T_NfaLink * ptLink)
 
 static int nfaLinkDelete(H_NFA hNfa, T_NfaLink *ptLink)
 {
-#ifdef debug
+#if debug
     printf("Delete Link:");
     nfaLinkDebug(ptLink);
 #endif
@@ -241,7 +255,7 @@ static int nfaLinkDelete(H_NFA hNfa, T_NfaLink *ptLink)
 
     nfaLinkFree(ptLink);
 
-#ifdef debug
+#if debug
     nfaDebug(hNfa);
 #endif
 
@@ -250,17 +264,17 @@ static int nfaLinkDelete(H_NFA hNfa, T_NfaLink *ptLink)
 
 static int nfaNodeLinkTo(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
 {
-#ifdef debug
+#if debug
     printf("Copy To Link:%d==>%d\n", ptSrc->iIndex, ptDst->iIndex);
 #endif
 
-    if (NFA_NODE_TYPE_END == ptSrc->iType) {
-        ptDst->iType = NFA_NODE_TYPE_END;
+    if (_IS_END(ptSrc->iType)) {
+        ptDst->iType |= NFA_NODE_TYPE_END;
     }
 
     LIST_LOOP(ptSrc->ptToList, nfaAddLink(hNfa, ptDst, ((T_NfaLink*) ptIter)->ptDstNode, ((T_NfaLink*) ptIter)->sKey));
 
-#ifdef debug
+#if debug
     nfaDebug(hNfa);
 #endif
 
@@ -269,17 +283,17 @@ static int nfaNodeLinkTo(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
 
 static int nfaNodeLinkFrom(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
 {
-#ifdef debug
+#if debug
     printf("Copy From Link:%d==>%d\n", ptSrc->iIndex, ptDst->iIndex);
 #endif
 
-    if (NFA_NODE_TYPE_END == ptSrc->iType) {
-        ptDst->iType = NFA_NODE_TYPE_END;
+    if (_IS_END(ptSrc->iType)) {
+        ptDst->iType |= NFA_NODE_TYPE_END;
     }
 
     LIST_LOOP(ptSrc->ptFromList, nfaAddLink(hNfa, ((T_NfaLink*) ptIter)->ptSrcNode, ptDst, ((T_NfaLink*) ptIter)->sKey));
 
-#ifdef debug
+#if debug
     nfaDebug(hNfa);
 #endif
 
@@ -288,17 +302,17 @@ static int nfaNodeLinkFrom(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
 
 static int nfaNodeDelete(H_NFA hNfa, T_NfaNode *ptNode)
 {
-#ifdef debug
+#if debug
     printf("Delete Node:%d\n", ptNode->iIndex);
 #endif
 
     LIST_LOOP(ptNode->ptToList, nfaLinkDelete(hNfa, ptIter));
     LIST_LOOP(ptNode->ptFromList, nfaLinkDelete(hNfa, ptIter));
 
-    nfaNodeFree(ptNode);
     listDel(hNfa->ptNodeList, ptNode);
+    nfaNodeFree(ptNode);
 
-#ifdef debug
+#if debug
     nfaDebug(hNfa);
 #endif
 
@@ -332,7 +346,7 @@ static int nfaLinkIsSame(T_NfaLink *ptLink, T_NfaNode *ptSrc, T_NfaNode *ptDst, 
 
 static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond)
 {
-    if (ptFrist->iType != ptSecond->iType) {
+    if (_IS_END(ptFrist->iType) != _IS_END(ptSecond->iType)) {
         return _FLASE;
     }
 
@@ -351,6 +365,7 @@ static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond)
         while (1) {
             T_NfaLink *ptLinkSeconde = (T_NfaLink *)listIterFetch(ptIterSeconde);
             if (NULL == ptLinkSeconde) {
+                listIterFree(ptIterFrist);
                 listIterFree(ptIterSeconde);
                 return _FLASE;
             }
@@ -368,6 +383,13 @@ static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond)
 
 static int nfaNodeCheckSameToLink(H_NFA hNfa, T_NfaNode *ptNode)
 {
+#if debug
+    int iIndex = ptNode->iIndex;
+    printf("##check node %d:\n", iIndex);
+#endif
+
+    int iFlag = _FLASE;
+
     H_LIST_ITER hIter = listIterNew(ptNode->ptFromList);
     while (1) {
         T_NfaLink *ptLink = (T_NfaLink *)listIterFetch(hIter);
@@ -386,39 +408,57 @@ static int nfaNodeCheckSameToLink(H_NFA hNfa, T_NfaNode *ptNode)
                 continue;
             }
 
-            if (nfaNodeIsSameToLink(ptLink->ptSrcNode, ptTmp->ptSrcNode)) {
-                if (ptTmp->ptSrcNode == ptNode) {
-                    printf("[%d]==>[%d]\n", ptLink->ptSrcNode->iIndex, ptTmp->ptSrcNode->iIndex);
-                    nfaNodeMerge(hNfa, ptTmp->ptSrcNode, ptLink->ptSrcNode);
-                    nfaDebug(hNfa);
-                    ptLink = NULL;
-                    break;
-                } else {
-                    printf("[%d]==>[%d]\n", ptTmp->ptSrcNode->iIndex, ptLink->ptSrcNode->iIndex);
-                    nfaNodeMerge(hNfa, ptLink->ptSrcNode, ptTmp->ptSrcNode);
-                    nfaDebug(hNfa);
-                    nfaNodeCheckSameToLink(hNfa, ptLink->ptSrcNode);
-                }
+            if (!nfaNodeIsSameToLink(ptLink->ptSrcNode, ptTmp->ptSrcNode)) {
+                continue;
             }
+
+            T_NfaNode *ptKeepNode = ptLink->ptSrcNode;
+            T_NfaNode *ptDelNode = ptTmp->ptSrcNode;
+
+            if (_IS_START(ptDelNode->iType)) {
+                ptDelNode = ptLink->ptSrcNode;
+                ptKeepNode = ptTmp->ptSrcNode;
+            }
+
+            nfaNodeMerge(hNfa, ptKeepNode, ptDelNode);
+
+            if (ptKeepNode != ptNode) {
+                nfaNodeCheckSameToLink(hNfa, ptKeepNode);
+            }
+
+            iFlag = _TRUE;
+            break;
         }
         listIterFree(hIterTmp);
+
+        if (iFlag) {
+            break;
+        }
     }
     listIterFree(hIter);
+
+    if (iFlag && _locListHasItem(hNfa->ptNodeList, ptNode)) {
+        return nfaNodeCheckSameToLink(hNfa, ptNode);
+    }
+
+#if debug
+    printf("##check node %d end\n", iIndex);
+#endif
 
     return 0;
 }
 
-static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptDst, T_NfaNode *ptSrc)
+static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptKeep, T_NfaNode *ptDelete)
 {
-#ifdef debug
-    printf("Merge Node:%d==>%d\n", ptSrc->iIndex, ptDst->iIndex);
+#if debug
+    printf("Merge Node:delete %d => keep %d\n", ptDelete->iIndex, ptKeep->iIndex);
 #endif
 
-    nfaNodeLinkTo(hNfa, ptDst, ptSrc);
-    nfaNodeLinkFrom(hNfa, ptDst, ptSrc);
-    nfaNodeDelete(hNfa, ptSrc);
+    nfaNodeLinkTo(hNfa, ptKeep, ptDelete);
+    nfaNodeLinkFrom(hNfa, ptKeep, ptDelete);
+    nfaNodeDelete(hNfa, ptDelete);
 
-#ifdef debug
+#if debug
     nfaDebug(hNfa);
 #endif
 
@@ -431,17 +471,40 @@ static int nfaNodeSimple(H_NFA hNfa, T_NfaLink *ptLink)
         return 0;
     }
 
-    if (NFA_NODE_TYPE_END == ptLink->ptDstNode->iType && 1 == listNum(ptLink->ptSrcNode->ptToList)) {
+    if (_IS_END(ptLink->ptDstNode->iType) && 1 == listNum(ptLink->ptSrcNode->ptToList)) {
         nfaNodeMerge(hNfa, ptLink->ptDstNode, ptLink->ptSrcNode);
     } else {
         nfaNodeLinkTo(hNfa, ptLink->ptSrcNode, ptLink->ptDstNode);
+
+        T_NfaNode *ptDstNode = ptLink->ptDstNode;
         nfaLinkDelete(hNfa, ptLink);
-        if (0 == listNum(ptLink->ptDstNode->ptFromList)) {
-            nfaNodeDelete(hNfa, ptLink->ptDstNode);
+        if (0 == listNum(ptDstNode->ptFromList)) {
+            nfaNodeDelete(hNfa, ptDstNode);
         }
     }
 
     return 0;
+}
+
+static int _locListHasItem(H_LIST ptList, void *ptItem)
+{
+    int iRet = _FLASE;
+
+    H_LIST_ITER pListIter = listIterNew(ptList);
+    while (1) {
+        void *ptIter = listIterFetch(pListIter);
+        if (NULL == ptIter) {
+            break;
+        }
+
+        if (ptItem == ptIter) {
+            iRet = _TRUE;
+            break;
+        }
+    }
+    listIterFree(pListIter);
+
+    return iRet;
 }
 
 /*-----------------------------  End ------------------------------------*/

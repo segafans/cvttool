@@ -46,6 +46,7 @@ typedef struct List {
 } T_List;
 
 /*---------------------- Local function declaration ---------------------*/
+static int listIterDebug(H_LIST ptList);
 
 /*-------------------------  Global variable ----------------------------*/
 
@@ -115,7 +116,7 @@ int listDel(H_LIST ptList, void *ptItem)
 {
     T_ListNode *ptNode = ptList->ptFrist;
     T_ListNode *ptLast = NULL;
-    for (ptNode=ptList->ptFrist; NULL != ptNode; ptLast=ptNode, ptNode=ptNode->ptNext) {
+    for (; NULL != ptNode; ptLast=ptNode, ptNode=ptNode->ptNext) {
         if (ptItem != ptNode->ptData) {
             continue;
         }
@@ -138,6 +139,7 @@ int listDel(H_LIST ptList, void *ptItem)
             p = p->ptNext;
         }
 
+        free(ptNode);
         ptList->iNum -= 1;
         break;
     }
@@ -160,6 +162,7 @@ H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter)
 
 H_LIST_ITER listIterNew(H_LIST ptList)
 {
+    listIterDebug(ptList);
     T_ListIter *ptIter = ptList->ptIter;
     while (ptIter) {
         if (0 == ptIter->iStatus) {
@@ -195,10 +198,21 @@ void * listIterFetch(H_LIST_ITER ptIter)
 int listIterFree(H_LIST_ITER ptIter)
 {
     ptIter->iStatus = 0;
+
     return 0;
 }
 
 /*-------------------------  Local functions ----------------------------*/
+
+static int listIterDebug(H_LIST ptList)
+{
+    T_ListIter *ptIter = ptList->ptIter;
+    while (ptIter) {
+        ptIter = ptIter->ptNext;
+    }
+
+    return 0;
+}
 
 /*-----------------------------  End ------------------------------------*/
 
