@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #include "nfa.h"
 #include "list.h"
@@ -17,12 +18,21 @@
 #define _DLEN_LARGE_BUF 1024
 #define _DLEN_HUGE_BUF  10240
 
+#define _DLEN_BITMAP     16
+
 #define _TRUE   (1==1)
 #define _FLASE  (1!=1)
 
 #define _IS_START(type) _IS_STATUS((type), NFA_NODE_TYPE_START)
 #define _IS_END(type) _IS_STATUS((type), NFA_NODE_TYPE_END)
 #define _IS_STATUS(type, status) ((type) & (status))
+
+#define BITMAP_MASK( bit )         (0x80>>(((bit)-1)&0x07))
+#define BITMAP_INDEX( bit )        (((bit)-1)>>3)
+#define BITMAP_TEST( bitmap, bit ) ((bitmap)[BITMAP_INDEX(bit)]&BITMAP_MASK(bit))
+#define BITMAP_CLR( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]&=~BITMAP_MASK(bit))
+#define BITMAP_SET( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]|=BITMAP_MASK(bit))
+#define BITMAP_TEST_NULL( bitmap ) (!((bitmap)[0]|(bitmap)[1]|(bitmap)[2]|(bitmap)[3]|(bitmap)[4]|(bitmap)[5]|(bitmap)[6]|(bitmap)[7]|(bitmap)[8]|(bitmap)[9]|(bitmap)[10]|(bitmap)[11]|(bitmap)[12]|(bitmap)[13]|(bitmap)[14]|(bitmap)[15]))
 
 #define debug 0
 
@@ -49,7 +59,7 @@ typedef struct NfaNode {
 } T_NfaNode;
 
 typedef struct NfaLink {
-    char sKey[32];
+    unsigned char sBitMap[_DLEN_BITMAP];
     H_NFA_NODE ptSrcNode;
     H_NFA_NODE ptDstNode;
 } T_NfaLink;
@@ -71,13 +81,14 @@ static int nfaNodeDelete(H_NFA hNfa, T_NfaNode *ptNode);
 
 static int nfaNodeSimple(H_NFA hNfa, T_NfaLink *ptLink);
 
-static T_NfaLink * nfaLinkNew(T_NfaNode *ptSrcNode, T_NfaNode *ptDstNode, char *psKey);
+static T_NfaLink * nfaLinkNew(T_NfaNode *ptSrcNode, T_NfaNode *ptDstNode, unsigned char *psBitMap);
 static int nfaLinkDelete(H_NFA hNfa, T_NfaLink *ptLink);
 static int nfaLinkFree(T_NfaLink* ptLink);
 static int nfaLinkDebug(T_NfaLink *ptLink);
-static int nfaLinkIsSame(T_NfaLink *ptLink,T_NfaNode *ptSrc, T_NfaNode *ptDst, char *psKey);
+static int nfaLinkIsSame(T_NfaLink *ptLink,T_NfaNode *ptSrc, T_NfaNode *ptDst, unsigned char *psKey);
 static int nfaNodeLinkTo(H_NFA hNfa, H_NFA_NODE ptSrc, H_NFA_NODE ptDst);
 static int nfaNodeLinkFrom(H_NFA hNfa, H_NFA_NODE ptSrc, H_NFA_NODE ptDst);
+static int nfaAddLinkBitMap(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, unsigned char *psBitMap);
 
 static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond);
 static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptDst, T_NfaNode *ptSrc);
@@ -137,28 +148,17 @@ H_NFA_NODE nfaNewNode(H_NFA ptNfa, int iType)
 
 int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *psKey)
 {
-    if (ptSrcNode == ptDstNode && (NULL == psKey || '\0' == psKey[0])) {
-        return 0;
-    }
+    unsigned char sBitMap[_DLEN_BITMAP];
+    memset(sBitMap, '\0', sizeof(sBitMap));
 
-    H_LIST_ITER pIter = listIterNew(ptSrcNode->ptToList);
-    while (1) {
-        T_NfaLink *ptTemp = listIterFetch(pIter);
-        if (NULL == ptTemp) {
-            break;
-        }
-
-        if (nfaLinkIsSame(ptTemp, ptSrcNode, ptDstNode, psKey)) {
-            listIterFree(pIter);
-            return 0;
+    if (NULL != psKey) {
+        int i = 0;
+        for (i=0; psKey[i] != '\0'; i++) {
+            BITMAP_SET(sBitMap, (unsigned char)psKey[i]);
         }
     }
-    listIterFree(pIter);
 
-    T_NfaLink *ptLink = nfaLinkNew(ptSrcNode, ptDstNode, psKey);
-    listAdd(ptNfa->ptLinkList, ptLink);
-
-    return 0;
+    return nfaAddLinkBitMap(ptNfa, ptSrcNode, ptDstNode, sBitMap);
 }
 
 /*-------------------------  Local functions ----------------------------*/
@@ -193,41 +193,44 @@ static int nfaNodeDebug(T_NfaNode *ptNode)
 
 static int nfaLinkDebug(T_NfaLink *ptLink)
 {
-    char *psSrcStart = "";
+    printf("[");
     if (_IS_START(ptLink->ptSrcNode->iType)) {
-        psSrcStart = "s:";
+        printf("s:");
     }
-
-    char *psSrcEnd = "";
     if ( _IS_END(ptLink->ptSrcNode->iType) ) {
-        psSrcEnd = "e:";
+        printf("e:");
+    }
+    printf("%d]--(", ptLink->ptSrcNode->iIndex);
+
+    unsigned int i;
+    for (i=1; i<=128; i++) {
+        if (BITMAP_TEST(ptLink->sBitMap, i)) {
+            if (isprint(i)) {
+                printf("%c", i);
+            } else {
+                printf("\\%03d", i);
+            }
+        }
     }
 
-    char *psDstStart = "";
+    printf(")-->[");
     if (_IS_START(ptLink->ptDstNode->iType)) {
-        psDstStart = "s:";
+        printf("s:");
     }
-
-    char *psDstEnd = "";
     if ( _IS_END(ptLink->ptDstNode->iType) ) {
-        psDstEnd = "e:";
+        printf("e:");
     }
+    printf("%d]\n", ptLink->ptDstNode->iIndex);
 
-    printf("[%s%s%d]--(%s)-->[%s%s%d]\n", psSrcStart, psSrcEnd, ptLink->ptSrcNode->iIndex, ptLink->sKey, psDstStart, psDstEnd, ptLink->ptDstNode->iIndex);
     return 0;
 }
 
-static T_NfaLink * nfaLinkNew(T_NfaNode *ptSrcNode, T_NfaNode *ptDstNode, char *psKey)
+static T_NfaLink * nfaLinkNew(T_NfaNode *ptSrcNode, T_NfaNode *ptDstNode, unsigned char *psBitMap)
 {
     T_NfaLink *ptLink = (T_NfaLink *)malloc(sizeof(T_NfaLink));
     ptLink->ptSrcNode = ptSrcNode;
     ptLink->ptDstNode = ptDstNode;
-
-    if (NULL == psKey) {
-        memset(ptLink->sKey, '\0', sizeof(ptLink->sKey));
-    } else {
-        strcpy(ptLink->sKey, psKey);
-    }
+    memcpy(ptLink->sBitMap, psBitMap, sizeof(ptLink->sBitMap));
 
     listAdd(ptSrcNode->ptToList, ptLink);
     listAdd(ptDstNode->ptFromList, ptLink);
@@ -272,7 +275,7 @@ static int nfaNodeLinkTo(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
         ptDst->iType |= NFA_NODE_TYPE_END;
     }
 
-    LIST_LOOP(ptSrc->ptToList, nfaAddLink(hNfa, ptDst, ((T_NfaLink*) ptIter)->ptDstNode, ((T_NfaLink*) ptIter)->sKey));
+    LIST_LOOP(ptSrc->ptToList, nfaAddLinkBitMap(hNfa, ptDst, ((T_NfaLink*) ptIter)->ptDstNode, ((T_NfaLink*) ptIter)->sBitMap));
 
 #if debug
     nfaDebug(hNfa);
@@ -291,7 +294,7 @@ static int nfaNodeLinkFrom(H_NFA hNfa, H_NFA_NODE ptDst, H_NFA_NODE ptSrc)
         ptDst->iType |= NFA_NODE_TYPE_END;
     }
 
-    LIST_LOOP(ptSrc->ptFromList, nfaAddLink(hNfa, ((T_NfaLink*) ptIter)->ptSrcNode, ptDst, ((T_NfaLink*) ptIter)->sKey));
+    LIST_LOOP(ptSrc->ptFromList, nfaAddLinkBitMap(hNfa, ((T_NfaLink*) ptIter)->ptSrcNode, ptDst, ((T_NfaLink*) ptIter)->sBitMap));
 
 #if debug
     nfaDebug(hNfa);
@@ -319,7 +322,7 @@ static int nfaNodeDelete(H_NFA hNfa, T_NfaNode *ptNode)
     return 0;
 }
 
-static int nfaLinkIsSame(T_NfaLink *ptLink, T_NfaNode *ptSrc, T_NfaNode *ptDst, char *psKey)
+static int nfaLinkIsSame(T_NfaLink *ptLink, T_NfaNode *ptSrc, T_NfaNode *ptDst, unsigned char *psBitMap)
 {
     if (ptLink->ptSrcNode != ptSrc) {
         return _FLASE;
@@ -329,15 +332,7 @@ static int nfaLinkIsSame(T_NfaLink *ptLink, T_NfaNode *ptSrc, T_NfaNode *ptDst, 
         return _FLASE;
     }
 
-    if (NULL == psKey || '\0' == psKey[0]) {
-        if ('\0' == ptLink->sKey[0]) {
-            return _TRUE;
-        } else {
-            return _FLASE;
-        }
-    }
-
-    if (0 != strcmp(ptLink->sKey, psKey)) {
+    if (0 != memcmp(ptLink->sBitMap, psBitMap, sizeof(ptLink->sBitMap))) {
         return _FLASE;
     }
 
@@ -370,7 +365,7 @@ static int nfaNodeIsSameToLink(T_NfaNode *ptFrist, T_NfaNode *ptSecond)
                 return _FLASE;
             }
 
-            if (nfaLinkIsSame(ptLinkFrist, ptLinkFrist->ptSrcNode, ptLinkSeconde->ptDstNode, ptLinkSeconde->sKey)) {
+            if (nfaLinkIsSame(ptLinkFrist, ptLinkFrist->ptSrcNode, ptLinkSeconde->ptDstNode, ptLinkSeconde->sBitMap)) {
                 break;
             }
         }
@@ -404,7 +399,7 @@ static int nfaNodeCheckSameToLink(H_NFA hNfa, T_NfaNode *ptNode)
                 break;
             }
 
-            if (0 != strcmp(ptLink->sKey, ptTmp->sKey)) {
+            if (0 != memcmp(ptLink->sBitMap, ptTmp->sBitMap, sizeof(ptLink->sBitMap))) {
                 continue;
             }
 
@@ -467,7 +462,7 @@ static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptKeep, T_NfaNode *ptDelete)
 
 static int nfaNodeSimple(H_NFA hNfa, T_NfaLink *ptLink)
 {
-    if ('\0' != ptLink->sKey[0]) {
+    if (!BITMAP_TEST_NULL(ptLink->sBitMap)) {
         return 0;
     }
 
@@ -505,6 +500,53 @@ static int _locListHasItem(H_LIST ptList, void *ptItem)
     listIterFree(pListIter);
 
     return iRet;
+}
+
+int nfaAddLinkBitMap(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, unsigned char *psBitMap)
+{
+    if (ptSrcNode == ptDstNode && BITMAP_TEST_NULL(psBitMap)) {
+        return 0;
+    }
+
+    H_LIST_ITER pIter = listIterNew(ptSrcNode->ptToList);
+    while (1) {
+        T_NfaLink *ptTemp = listIterFetch(pIter);
+        if (NULL == ptTemp) {
+            break;
+        }
+
+        if (ptTemp->ptDstNode != ptDstNode) {
+            continue;
+        }
+
+        if (!nfaLinkIsSame(ptTemp, ptSrcNode, ptDstNode, psBitMap)) {
+            ptTemp->sBitMap[0] |= psBitMap[0];
+            ptTemp->sBitMap[1] |= psBitMap[1];
+            ptTemp->sBitMap[2] |= psBitMap[2];
+            ptTemp->sBitMap[3] |= psBitMap[3];
+            ptTemp->sBitMap[4] |= psBitMap[4];
+            ptTemp->sBitMap[5] |= psBitMap[5];
+            ptTemp->sBitMap[6] |= psBitMap[6];
+            ptTemp->sBitMap[7] |= psBitMap[7];
+            ptTemp->sBitMap[8] |= psBitMap[8];
+            ptTemp->sBitMap[9] |= psBitMap[9];
+            ptTemp->sBitMap[10] |= psBitMap[10];
+            ptTemp->sBitMap[11] |= psBitMap[11];
+            ptTemp->sBitMap[12] |= psBitMap[12];
+            ptTemp->sBitMap[13] |= psBitMap[13];
+            ptTemp->sBitMap[14] |= psBitMap[14];
+            ptTemp->sBitMap[15] |= psBitMap[15];
+        }
+
+        listIterFree(pIter);
+        return 0;
+    }
+    listIterFree(pIter);
+
+    T_NfaLink *ptLink = nfaLinkNew(ptSrcNode, ptDstNode, psBitMap);
+    listAdd(ptNfa->ptLinkList, ptLink);
+    
+    return 0;
 }
 
 /*-----------------------------  End ------------------------------------*/

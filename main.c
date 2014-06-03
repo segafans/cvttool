@@ -37,6 +37,7 @@ static char locInputNext(T_InPut *ptInput);
 static int locStructMerge(H_NFA hNfa, T_NfaStruct *ptDst, T_NfaStruct *ptSrc);
 static int locStructInitKey(H_NFA hNfa, T_NfaStruct *ptStrcut, char caInput);
 static int locStructSetMuti(H_NFA hNfa, T_NfaStruct *ptStruct);
+static int locStructInitAllKey(H_NFA hNfa, T_NfaStruct *ptStrcut);
 
 /*-------------------------  Global variable ----------------------------*/
 
@@ -46,7 +47,7 @@ int main(int argc, char *argv[])
     int iRet = 0;
 
     T_InPut tInPut;
-    locInputInit(&tInPut, "a");
+    locInputInit(&tInPut, "\\.");
 
     H_NFA hNfa;
     hNfa = nfaNew();
@@ -93,9 +94,18 @@ static int locParse(H_NFA hNfa, T_NfaStruct *ptStruct, T_InPut *ptInPut)
             memset(&tLocStruct, '\0', sizeof(T_NfaStruct));
         } else if ('*' == caTmp) {
             if (NULL == tLast.hEnd || NULL == tLast.hStart) {
-                return 0;
+                locStructInitKey(hNfa, &tLast, caTmp);
+                locStructAdd(hNfa, &tLocStruct, &tLast);
+            } else {
+                locStructSetMuti(hNfa, &tLast);
             }
-            locStructSetMuti(hNfa, &tLast);
+        } else if ( '.' == caTmp ) {
+            locStructInitAllKey(hNfa, &tLast);
+            locStructAdd(hNfa, &tLocStruct, &tLast);
+        } else if ( '\\' == caTmp ) {
+            caTmp = locInputNext(ptInPut);
+            locStructInitKey(hNfa, &tLast, caTmp);
+            locStructAdd(hNfa, &tLocStruct, &tLast);
         } else {
             locStructInitKey(hNfa, &tLast, caTmp);
             locStructAdd(hNfa, &tLocStruct, &tLast);
@@ -109,6 +119,21 @@ static int locStructInit(H_NFA hNfa, T_NfaStruct *ptStruct)
 {
     ptStruct->hStart = nfaNewNode(hNfa, NFA_NODE_TYPE_NORMAL);
     ptStruct->hEnd = nfaNewNode(hNfa, NFA_NODE_TYPE_NORMAL);
+
+    return 0;
+}
+
+static int locStructInitAllKey(H_NFA hNfa, T_NfaStruct *ptStrcut)
+{
+    char sKey[128+1];
+
+    int i = 1;
+    for (i=1; i<=128; i++) {
+        sKey[i-1] = (unsigned char)i;
+    }
+
+    locStructInit(hNfa, ptStrcut);
+    nfaAddLink(hNfa, ptStrcut->hStart, ptStrcut->hEnd, sKey);
 
     return 0;
 }
