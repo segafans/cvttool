@@ -95,6 +95,7 @@ static int nfaNodeMerge(H_NFA hNfa, T_NfaNode *ptDst, T_NfaNode *ptSrc);
 static int nfaNodeCheckSameToLink(H_NFA hNfa, T_NfaNode *ptNode);
 
 static int _locListHasItem(H_LIST ptList, void *ptItem);
+static int printfChar(unsigned char caChar);
 
 /*-------------------------  Global variable ----------------------------*/
 
@@ -126,6 +127,14 @@ int nfaDebug(H_NFA ptNfa)
     return 0;
 }
 
+int nfaReindex(H_NFA hNfa)
+{
+    int i = 1;
+    LIST_LOOP(hNfa->ptNodeList, ((T_NfaNode *)ptIter)->iIndex = i++);
+
+    return 0;
+}
+
 int nfaSimple(H_NFA hNfa)
 {
     LIST_LOOP(hNfa->ptLinkList, nfaNodeSimple(hNfa, ptIter));
@@ -143,10 +152,14 @@ H_NFA_NODE nfaNewNode(H_NFA ptNfa, int iType)
     T_NfaNode *ptNode = nfaNodeNew(listNum(ptNfa->ptNodeList)+1, iType);
     listAdd(ptNfa->ptNodeList, ptNode);
 
+    if (_IS_START(iType)) {
+        ptNfa->ptStart = ptNode;
+    }
+
     return ptNode;
 }
 
-int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *psKey)
+int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *psKey, int iFlag)
 {
     unsigned char sBitMap[_DLEN_BITMAP];
     memset(sBitMap, '\0', sizeof(sBitMap));
@@ -158,7 +171,23 @@ int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *ps
         }
     }
 
+    if (iFlag) {
+        int i = 1;
+        for (; i<=128; i++) {
+            if (BITMAP_TEST(sBitMap, i)) {
+                BITMAP_CLR(sBitMap, i);
+            } else {
+                BITMAP_SET(sBitMap, i);
+            }
+        }
+    }
+
     return nfaAddLinkBitMap(ptNfa, ptSrcNode, ptDstNode, sBitMap);
+}
+
+H_NFA_NODE nfaGetStartNode(H_NFA hNfa)
+{
+    return hNfa->ptStart;
 }
 
 /*-------------------------  Local functions ----------------------------*/
@@ -205,13 +234,12 @@ static int nfaLinkDebug(T_NfaLink *ptLink)
     unsigned int i;
     for (i=1; i<=128; i++) {
         if (BITMAP_TEST(ptLink->sBitMap, i)) {
-            if (isprint(i)) {
-                printf("%c", i);
-            } else {
-                printf("\\%03d", i);
-            }
+            printfChar(i);
+        } else {
+            printfChar(0);
         }
     }
+    printfChar(0);
 
     printf(")-->[");
     if (_IS_START(ptLink->ptDstNode->iType)) {
@@ -221,6 +249,50 @@ static int nfaLinkDebug(T_NfaLink *ptLink)
         printf("e:");
     }
     printf("%d]\n", ptLink->ptDstNode->iIndex);
+
+    return 0;
+}
+
+static int printfChar(unsigned char caChar)
+{
+    static unsigned char caFrist = 0;
+    static unsigned char caLast = 0;
+
+    if (0 == caChar) {
+        if (0 == caFrist) {
+            return 0;
+        }
+
+        if (isprint(caFrist)) {
+            printf("%c", caFrist);
+        } else {
+            printf("\\%03d", caFrist);
+        }
+
+        if (0 != caLast) {
+            if (caFrist + 1 != caLast) {
+                printf("-");
+            }
+
+            if (isprint(caLast)) {
+                printf("%c", caLast);
+            } else {
+                printf("\\%03d", caLast);
+            }
+        }
+
+        caFrist = 0;
+        caLast = 0;
+
+        return 0;
+    }
+
+    if (0 == caFrist) {
+        caFrist = caChar;
+        return 0;
+    }
+
+    caLast = caChar;
 
     return 0;
 }

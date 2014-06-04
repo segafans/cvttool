@@ -16,6 +16,7 @@
 /*---------------------------- Type define ------------------------------*/
 typedef struct Nfa *     H_NFA;
 typedef struct NfaNode * H_NFA_NODE;
+typedef struct NfaLink * H_NFA_LINK;
 
 /*---------------------- Global variable declaration---------------------*/
 
@@ -28,8 +29,11 @@ extern "C" {
     int nfaFree(H_NFA ptNfa);
     int nfaDebug(H_NFA ptNfa);
     int nfaSimple(H_NFA hNfa);
+    int nfaReindex(H_NFA hNfa);
     H_NFA_NODE nfaNewNode(H_NFA ptNfa, int iType);
-    int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *psKey);
+    int nfaAddLink(H_NFA ptNfa, H_NFA_NODE ptSrcNode, H_NFA_NODE ptDstNode, char *psKey, int iFlag);
+
+    H_NFA_NODE nfaGetStartNode(H_NFA hNfa);
 
 #ifdef __cplusplus
 }
