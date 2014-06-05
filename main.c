@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
-#include "nfa.h"
 #include "list.h"
 
 /*--------------------------- Macro define ------------------------------*/
@@ -17,256 +17,311 @@
 #define _DLEN_LARGE_BUF 1024
 #define _DLEN_HUGE_BUF  10240
 
-#define _DLEN_KEY_MAX   128
+#define _DLEN_BITMAP     16
+#define _NUM_BITMAP      _DLEN_BITMAP*8
+
+#define BITMAP_MASK( bit )         (0x80>>(((bit)-1)&0x07))
+#define BITMAP_INDEX( bit )        (((bit)-1)>>3)
+#define BITMAP_TEST( bitmap, bit ) ((bitmap)[BITMAP_INDEX(bit)]&BITMAP_MASK(bit))
+#define BITMAP_CLR( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]&=~BITMAP_MASK(bit))
+#define BITMAP_SET( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]|=BITMAP_MASK(bit))
 
 /*---------------------------- Type define ------------------------------*/
-typedef struct NfaStruct {
-    H_NFA_NODE hStart;
-    H_NFA_NODE hEnd;
-} T_NfaStruct;
+typedef enum {
+    TYPE_STRING,
+    TYPE_BITMAP,
+    TYPE_NODE_START,
+    TYPE_NODE_END,
+    TYPE_NUM
+} E_TYPE;
 
-typedef struct InPut {
-    char *psBuf;
-    int iCurrent;
-} T_InPut;
+typedef struct {
+    char *psValue;
+    int iLoop;
+    E_TYPE eType;
+} T_Value;
+
+typedef void (*FNC_DEBUG)(T_Value *ptValue);
 
 /*---------------------- Local function declaration ---------------------*/
-static int locParse(H_NFA hNfa, T_NfaStruct *ptStruct, T_InPut *ptInPut);
-static int locStructInit(H_NFA hNfa, T_NfaStruct *ptStruct);
-static int locStructAdd(H_NFA hNfa, T_NfaStruct *ptDst, T_NfaStruct *ptSrc);
-static int locInputInit(T_InPut *ptInPut, char *psBuffer);
-static char locInputNext(T_InPut *ptInput);
-static int locStructMerge(H_NFA hNfa, T_NfaStruct *ptDst, T_NfaStruct *ptSrc);
-static int locStructInitKey(H_NFA hNfa, T_NfaStruct *ptStrcut, char caInput);
-static int locStructSetMuti(H_NFA hNfa, T_NfaStruct *ptStruct);
-static int locStructInitAllKey(H_NFA hNfa, T_NfaStruct *ptStrcut);
-static int locInputTest(T_InPut *ptInput , char caChar);
-static int locStructInitMuti(H_NFA hNfa, T_NfaStruct *ptStrcut, T_InPut *ptInput);
+static int locParse(char *psBuf, H_LIST hList);
+static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
+
+static void valueStringDebug(T_Value *ptValue);
+static void valueBitMapDebug(T_Value *ptValue);
+static int printfChar(unsigned char caChar);
+static char * getBitMap(char *psBuf, int *piLen);
+static void valueNodeStartDebug(T_Value *ptValue);
+static void valueNodeEndDebug(T_Value *ptValue);
+static char * getName(char *psBuf, int *piLen);
+static int getLoop(char *psBuf, int *piLen);
 
 /*-------------------------  Global variable ----------------------------*/
+FNC_DEBUG f_fncDebug[TYPE_NUM] = {
+    valueStringDebug,
+    valueBitMapDebug,
+    valueNodeStartDebug,
+    valueNodeEndDebug
+};
+
 
 /*-------------------------  Global functions ---------------------------*/
 int main(int argc, char *argv[])
 {
-    int iRet = 0;
+    H_LIST hList = listNew();
 
-    T_InPut tInPut;
-    locInputInit(&tInPut, "asdfasdf");
+    locParse("1(?:<test>23456)*[a-z1-9A\\-Z]*890.{10}", hList);
 
-    H_NFA hNfa;
-    hNfa = nfaNew();
-
-    T_NfaStruct tStruct;
-    tStruct.hStart = nfaNewNode(hNfa, NFA_NODE_TYPE_START);
-    tStruct.hEnd = nfaNewNode(hNfa, NFA_NODE_TYPE_END);
-
-    iRet = locParse(hNfa, &tStruct, &tInPut);
-    if (iRet != 0) {
-        nfaFree(hNfa);
-        printf("locParse err[%d]", iRet);
-        return -1;
-    }
-
-    nfaDebug(hNfa);
-    nfaSimple(hNfa);
-    nfaDebug(hNfa);
-    nfaReindex(hNfa);
-    nfaDebug(hNfa);
-
-    H_NFA_NODE ptFrist = nfaGetStartNode(hNfa);
-    locDebug(ptFrist);
-
-    nfaFree(hNfa);
+    LIST_LOOP(hList, f_fncDebug[((T_Value *)ptIter)->eType](ptIter));
 
     return 0;
 }
 
 /*-------------------------  Local functions ----------------------------*/
-static int locParse(H_NFA hNfa, T_NfaStruct *ptStruct, T_InPut *ptInPut)
+static int locParse(char *psBuf, H_LIST hList)
 {
-    T_NfaStruct tLocStruct;
-    T_NfaStruct tLast;
-    memset(&tLocStruct, '\0', sizeof(T_NfaStruct));
-    memset(&tLast, '\0', sizeof(T_NfaStruct));
+    T_Value *ptLast = NULL;
+    T_Value *ptLastNode = NULL;
+    char *pStart= psBuf;
+    char *pCur = psBuf;
 
-    while (1) {
-        char caTmp = locInputNext(ptInPut);
-        if ('\0' == caTmp || ')' == caTmp) {
-            locStructMerge(hNfa, ptStruct, &tLocStruct);
-            break;
-        } else if ('(' == caTmp) {
-            locStructInit(hNfa, &tLast);
-            locParse(hNfa, &tLast, ptInPut);
-            locStructAdd(hNfa, &tLocStruct, &tLast);
-        } else if ('[' == caTmp) {
-            locStructInitMuti(hNfa, &tLast, ptInPut);
-            locStructAdd(hNfa, &tLocStruct, &tLast);
-        } else if ('|' == caTmp) {
-            locStructMerge(hNfa, ptStruct, &tLocStruct);
-            memset(&tLocStruct, '\0', sizeof(T_NfaStruct));
-        } else if ('*' == caTmp) {
-            if (NULL == tLast.hEnd || NULL == tLast.hStart) {
-                locStructInitKey(hNfa, &tLast, caTmp);
-                locStructAdd(hNfa, &tLocStruct, &tLast);
-            } else {
-                locStructSetMuti(hNfa, &tLast);
-            }
-        } else if ( '.' == caTmp ) {
-            locStructInitAllKey(hNfa, &tLast);
-            locStructAdd(hNfa, &tLocStruct, &tLast);
-        } else if ( '\\' == caTmp ) {
-            caTmp = locInputNext(ptInPut);
-            locStructInitKey(hNfa, &tLast, caTmp);
-            locStructAdd(hNfa, &tLocStruct, &tLast);
-        } else {
-            locStructInitKey(hNfa, &tLast, caTmp);
-            locStructAdd(hNfa, &tLocStruct, &tLast);
-        }
-    }
-
-    return 0;
-}
-
-static int locStructInitMuti(H_NFA hNfa, T_NfaStruct *ptStrcut, T_InPut *ptInput)
-{
-    char sKey[_DLEN_KEY_MAX+1];
-    int i = 0;
-    int iFlag = 0;
-
-    if (locInputTest(ptInput, '^')) {
-        iFlag = 1;
-        locInputNext(ptInput);
-    }
-
-    while (1) {
-        char caTmp = locInputNext(ptInput);
-        if (']' == caTmp) {
-            break;
-        }
-
-        if ('\\' == caTmp) {
-            caTmp = locInputNext(ptInput);
-            sKey[i++] = caTmp;
+    for (;'\0'!=*pCur;pCur++) {
+        char caTemp = *pCur;
+        if (caTemp != '.' && caTemp != '[' && caTemp != '*' && caTemp != '(' && caTemp != ')' && caTemp != '{') {
             continue;
         }
 
-        if (i != 0 && '-' == caTmp) {
-            char caFrist = sKey[i-1]+1;
-            char caLast = locInputNext(ptInput);
-
-            if (caLast < caFrist) {
-                caFrist = caLast;
-                caLast = sKey[i-1]-1;
+        if ('*' == caTemp || '{' == caTemp) {
+            int iLoop = -1;
+            int iLen = 0;
+            if ('{' == caTemp) {
+                iLoop = getLoop(pCur+1, &iLen);
             }
 
-            for (; caFrist <= caLast; caFrist++) {
-                sKey[i++] = caFrist;
+            if (pCur == pStart && ptLast != NULL) {
+                ptLast->iLoop = iLoop;
             }
 
+            if (pCur != pStart) {
+                listAdd(hList, valueNew(TYPE_STRING, pStart, (int)(pCur-pStart)-1));
+                T_Value *ptValue = valueNew(TYPE_STRING, pCur-1, 1);
+                ptValue->iLoop = iLoop;
+                listAdd(hList, ptValue);
+            }
+
+            pStart = pCur + iLen + 1;
             continue;
         }
 
-        sKey[i++] = caTmp;
+        if (pCur != pStart) {
+            listAdd(hList, valueNew(TYPE_STRING, pStart, (int)(pCur-pStart)));
+        }
+
+        if ('.' == caTemp) {
+            ptLast = valueNew(TYPE_BITMAP, getBitMap(NULL, NULL), _DLEN_BITMAP);
+            listAdd(hList, ptLast);
+        } else if ('[' == caTemp) {
+            int iLen = 0;
+            ptLast = valueNew(TYPE_BITMAP, getBitMap(pCur+1, &iLen), _DLEN_BITMAP);
+            listAdd(hList, ptLast);
+            pCur += iLen + 1;
+        } else if ('(' == caTemp) {
+            char *psName = NULL;
+            int iLen = 0;
+            if ('?' == *(pCur+1)) {
+                psName = getName(pCur+2, &iLen);
+            }
+            ptLastNode = valueNew(TYPE_NODE_START, psName, iLen);
+            listAdd(hList, ptLastNode);
+            if (psName != NULL) {
+                pCur += iLen + 4;
+            }
+        } else if (')' == caTemp) {
+            listAdd(hList, valueNew(TYPE_NODE_END, NULL, 0));
+            ptLast = ptLastNode;
+            ptLastNode = NULL;
+        }
+
+        pStart = pCur+1;
     }
 
-    sKey[i] = '\0';
-
-    locStructInit(hNfa, ptStrcut);
-    nfaAddLink(hNfa, ptStrcut->hStart, ptStrcut->hEnd, sKey, iFlag);
-
-    return 0;
-}
-
-static int locStructInit(H_NFA hNfa, T_NfaStruct *ptStruct)
-{
-    ptStruct->hStart = nfaNewNode(hNfa, NFA_NODE_TYPE_NORMAL);
-    ptStruct->hEnd = nfaNewNode(hNfa, NFA_NODE_TYPE_NORMAL);
+    if (pCur != pStart) {
+        listAdd(hList, valueNew(TYPE_STRING, pStart, (int)(pCur-pStart)));
+    }
 
     return 0;
 }
 
-static int locStructInitAllKey(H_NFA hNfa, T_NfaStruct *ptStrcut)
+static int getLoop(char *psBuf, int *piLen)
 {
-    char sKey[_DLEN_KEY_MAX+1];
+    char sLen[_DLEN_TINY_BUF];
+    memset(sLen, '\0', sizeof(sLen));
 
-    int i = 1;
+    int iLen = 0;
+    while (psBuf[iLen] != '}') {
+        sLen[iLen] = psBuf[iLen];
+        iLen += 1;
+    }
+    *piLen = iLen+1;
+
+    return atoi(sLen);
+}
+
+static char * getName(char *psBuf, int *piLen)
+{
+    char *psName = NULL;
+
+    if (':' != psBuf[0] || '<' != psBuf[1]) {
+        return NULL;
+    }
+
+    psName = psBuf + 2;
+    int iLen = 0;
+    while (psName[iLen]!='>' && psName[iLen]!='\0') {
+        iLen += 1;
+    }
+    *piLen = iLen;
+
+    return psName;
+}
+
+static char * getBitMap(char *psBuf, int *piLen)
+{
+    static char sBitMap[_DLEN_BITMAP];
+
+    memset(sBitMap, '\0', sizeof(sBitMap));
+    if (NULL == psBuf) {
+        unsigned int i = 1;
+        for (i=1; i<=_NUM_BITMAP; i++) {
+            BITMAP_SET(sBitMap, i);
+        }
+    } else {
+        int iLen = 0;
+        for (; psBuf[iLen] != ']' && psBuf[iLen] != '\0'; ++iLen) {
+            if (iLen != 0 && '-' == psBuf[iLen]) {
+                if (psBuf[iLen-1] == psBuf[iLen+1]) {
+                    iLen += 1;
+                    continue;
+                }
+
+                unsigned char caStart = psBuf[iLen-1];
+                unsigned char caEnd   = psBuf[iLen+1];
+
+                if (caStart > caEnd) {
+                    caStart = psBuf[iLen+1];
+                    caEnd   = psBuf[iLen-1];
+                }
+
+                for (; caStart<=caEnd; caStart++) {
+                    BITMAP_SET(sBitMap, caStart);
+                }
+                continue;
+            } else if ( '\\' == psBuf[iLen] ) {
+                iLen += 1;
+            }
+
+            BITMAP_SET(sBitMap, (unsigned char )psBuf[iLen]);
+        }
+        *piLen = iLen;
+    }
+
+    return sBitMap;
+}
+
+static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen)
+{
+    T_Value *ptValue = malloc(sizeof(T_Value));
+    ptValue->eType = eType;
+    ptValue->iLoop = 1;
+
+    ptValue->psValue = NULL;
+    if (NULL != psValue && 0 != iLen) {
+        ptValue->psValue = malloc(iLen+1);
+        memcpy(ptValue->psValue, psValue, iLen);
+        ptValue->psValue[iLen] = '\0';
+    }
+
+    return ptValue;
+}
+
+static void valueStringDebug(T_Value *ptValue)
+{
+    printf("[string][%d]%s\n", ptValue->iLoop, ptValue->psValue);
+}
+
+static void valueNodeStartDebug(T_Value *ptValue)
+{
+    printf("[node start][%d]", ptValue->iLoop);
+    if (NULL != ptValue->psValue) {
+        printf("%s", ptValue->psValue);
+    }
+
+    printf("\n");
+}
+
+static void valueNodeEndDebug(T_Value *ptValue)
+{
+    printf("[node end]\n");
+}
+
+static void valueBitMapDebug(T_Value *ptValue)
+{
+    printf("[bitmap][%d]", ptValue->iLoop);
+
+    unsigned int i = 0;
     for (i=1; i<=128; i++) {
-        sKey[i-1] = (unsigned char)i;
+        if (BITMAP_TEST(ptValue->psValue, i)) {
+            printfChar(i);
+        } else {
+            printfChar(0);
+        }
     }
+    printfChar(0);
 
-    locStructInit(hNfa, ptStrcut);
-    nfaAddLink(hNfa, ptStrcut->hStart, ptStrcut->hEnd, sKey, 0);
-
-    return 0;
+    printf("\n");
 }
 
-static int locStructInitKey(H_NFA hNfa, T_NfaStruct *ptStrcut, char caInput)
+static int printfChar(unsigned char caChar)
 {
-    char sKey[2];
+    static unsigned char caFrist = 0;
+    static unsigned char caLast = 0;
 
-    sKey[0] = caInput;
-    sKey[1] = '\0';
+    if (0 == caChar) {
+        if (0 == caFrist) {
+            return 0;
+        }
 
-    locStructInit(hNfa, ptStrcut);
-    nfaAddLink(hNfa, ptStrcut->hStart, ptStrcut->hEnd, sKey, 0);
+        if (isprint(caFrist)) {
+            printf("%c", caFrist);
+        } else {
+            printf("\\%03d", caFrist);
+        }
 
-    return 0;
-}
+        if (0 != caLast) {
+            if (caFrist + 1 != caLast) {
+                printf("-");
+            }
 
-static int locStructMerge(H_NFA hNfa, T_NfaStruct *ptDst, T_NfaStruct *ptSrc)
-{
-    nfaAddLink(hNfa, ptDst->hStart, ptSrc->hStart, NULL, 0);
-    nfaAddLink(hNfa, ptSrc->hEnd, ptDst->hEnd, NULL, 0);
+            if (isprint(caLast)) {
+                printf("%c", caLast);
+            } else {
+                printf("\\%03d", caLast);
+            }
+        }
 
-    return 0;
-}
+        caFrist = 0;
+        caLast = 0;
 
-static int locStructAdd(H_NFA hNfa, T_NfaStruct *ptDst, T_NfaStruct *ptSrc)
-{
-    if (NULL == ptDst->hStart) {
-        memcpy(ptDst, ptSrc, sizeof(T_NfaStruct));
         return 0;
     }
 
-    nfaAddLink(hNfa, ptDst->hEnd, ptSrc->hStart, NULL, 0);
-    ptDst->hEnd = ptSrc->hEnd;
-
-    return 0;
-}
-
-static int locInputInit(T_InPut *ptInPut, char *psBuffer)
-{
-    ptInPut->psBuf = psBuffer;
-    ptInPut->iCurrent = 0;
-
-    return 0;
-}
-
-static char locInputNext(T_InPut *ptInput)
-{
-    return ptInput->psBuf[ptInput->iCurrent++];
-}
-
-static int locInputTest(T_InPut *ptInput , char caChar)
-{
-    return (ptInput->psBuf[ptInput->iCurrent] == caChar);
-}
-
-static int locStructSetMuti(H_NFA hNfa, T_NfaStruct *ptStruct)
-{
-    nfaAddLink(hNfa, ptStruct->hEnd, ptStruct->hStart, NULL, 0);
-    nfaAddLink(hNfa, ptStruct->hStart, ptStruct->hEnd, NULL, 0);
-    return 0;
-}
-
-static int locDebug(H_NFA_NODE hNode)
-{
-    H_NFA_LINK hLink = NULL;
-
-    while (1) {
-        hLink = nfaNodeFetchLink(hNode);
+    if (0 == caFrist) {
+        caFrist = caChar;
+        return 0;
     }
-
+    
+    caLast = caChar;
+    
     return 0;
 }
 

@@ -13,6 +13,19 @@
 /*--------------------------- Include files -----------------------------*/
 
 /*--------------------------- Macro define ------------------------------*/
+#define LIST_LOOP(list, fnc) \
+do { \
+    H_LIST_ITER pListIter = listIterNew(list); \
+    while (1) { \
+        void *ptIter = listIterFetch(pListIter); \
+        if (NULL == ptIter) { \
+            break; \
+        } \
+        \
+        fnc; \
+    } \
+    listIterFree(pListIter); \
+} while(0);
 
 /*---------------------------- Type define ------------------------------*/
 typedef struct List * H_LIST;
