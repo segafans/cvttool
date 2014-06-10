@@ -40,7 +40,10 @@ typedef enum {
 
 typedef struct {
     char *psValue;
-    int iLoop;
+    union {
+        int iLoop;
+        int iFlag;
+    };
     E_TYPE eType;
 } T_Value;
 
@@ -56,7 +59,7 @@ static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
 static void valueStringDebug(T_Value *ptValue);
 static void valueBitMapDebug(T_Value *ptValue);
 static int storeChar(unsigned char caChar, unsigned char *psFrist, unsigned char *psLast);
-static char * getBitMap(char *psBuf, int *piLen);
+static char * getBitMap(char *psBuf, int *piFlag, int *piLen);
 static void valueNodeStartDebug(T_Value *ptValue);
 static void valueNodeEndDebug(T_Value *ptValue);
 static char * setLoop(T_Value *ptValue, H_LIST ptList, char *pCur);
@@ -79,7 +82,7 @@ int main(int argc, char *argv[])
 {
     H_LIST hList = listNew();
 
-    locParse("1(?:23456)*([a-z]*890).{10}", hList);
+    locParse("1(?:23456)*([a-z]*890)[^;]*", hList);
 
     _("#include <string.h>");
     _("#include <stdio.h>");
@@ -89,6 +92,7 @@ int main(int argc, char *argv[])
     _("{");
     f_Level = 1;
     _("int iPos = 0;");
+    _("int i = 0;");
     LIST_LOOP(hList, f_fncDebug[((T_Value *)ptIter)->eType](ptIter));
     _("return 0;");
     f_Level = 0;
@@ -128,14 +132,16 @@ static int locParse(char *psBuf, H_LIST hList)
 
         /* . */
         if ('.' == *pCur) {
-            pCur = setLoop(valueNew(TYPE_BITMAP, getBitMap(NULL, NULL), _DLEN_BITMAP), hList, pCur+1);
+            pCur = setLoop(valueNew(TYPE_BITMAP, getBitMap(NULL, NULL, NULL), _DLEN_BITMAP), hList, pCur+1);
             continue;
         }
 
         /* [....] */
         if ('[' == *pCur) {
             int iLen = 0;
-            T_Value * ptLast = valueNew(TYPE_BITMAP, getBitMap(pCur+1, &iLen), _DLEN_BITMAP);
+            int iFlag = 0;
+            T_Value * ptLast = valueNew(TYPE_BITMAP, getBitMap(pCur+1, &iFlag, &iLen), _DLEN_BITMAP);
+            ptLast->iFlag = iFlag;
             pCur = setLoop(ptLast, hList, pCur + iLen + 2);
             continue;
         }
@@ -224,7 +230,7 @@ static int getLoop(char *psBuf, int *piLen)
     return atoi(sLen);
 }
 
-static char * getBitMap(char *psBuf, int *piLen)
+static char * getBitMap(char *psBuf, int *piFlag, int *piLen)
 {
     static char sBitMap[_DLEN_BITMAP];
 
@@ -234,35 +240,48 @@ static char * getBitMap(char *psBuf, int *piLen)
         for (i=1; i<=_NUM_BITMAP; i++) {
             BITMAP_SET(sBitMap, i);
         }
-    } else {
-        int iLen = 0;
-        for (; psBuf[iLen] != ']' && psBuf[iLen] != '\0'; ++iLen) {
-            if (iLen != 0 && '-' == psBuf[iLen]) {
-                if (psBuf[iLen-1] == psBuf[iLen+1]) {
-                    iLen += 1;
-                    continue;
-                }
 
-                unsigned char caStart = psBuf[iLen-1];
-                unsigned char caEnd   = psBuf[iLen+1];
+        return sBitMap;
+    }
 
-                if (caStart > caEnd) {
-                    caStart = psBuf[iLen+1];
-                    caEnd   = psBuf[iLen-1];
-                }
+    int iLen = 0;
+    if (NULL != piFlag) {
+        *piFlag = 0;
+    }
 
-                for (; caStart<=caEnd; caStart++) {
-                    BITMAP_SET(sBitMap, caStart);
-                }
-                continue;
-            } else if ( '\\' == psBuf[iLen] ) {
+    if ('^' == psBuf[0]) {
+        if (NULL != piFlag) {
+            *piFlag = 1;
+        }
+        iLen += 1;
+    }
+
+    for (; psBuf[iLen] != ']' && psBuf[iLen] != '\0'; ++iLen) {
+        if (iLen != 0 && '-' == psBuf[iLen]) {
+            if (psBuf[iLen-1] == psBuf[iLen+1]) {
                 iLen += 1;
+                continue;
             }
 
-            BITMAP_SET(sBitMap, (unsigned char )psBuf[iLen]);
+            unsigned char caStart = psBuf[iLen-1];
+            unsigned char caEnd   = psBuf[iLen+1];
+
+            if (caStart > caEnd) {
+                caStart = psBuf[iLen+1];
+                caEnd   = psBuf[iLen-1];
+            }
+
+            for (; caStart<=caEnd; caStart++) {
+                BITMAP_SET(sBitMap, caStart);
+            }
+            continue;
+        } else if ( '\\' == psBuf[iLen] ) {
+            iLen += 1;
         }
-        *piLen = iLen;
+
+        BITMAP_SET(sBitMap, (unsigned char )psBuf[iLen]);
     }
+    *piLen = iLen;
 
     return sBitMap;
 }
@@ -332,6 +351,7 @@ static void valueNodeEndDebug(T_Value *ptValue)
     if (NULL != ptValue->psValue) {
         _("/* [get end] %s */", ptValue->psValue);
         _("int iLen%s = psBuf + iPos - s%s;", ptValue->psValue, ptValue->psValue);
+        _("printf(\"%s:[%%.*s]\\n\", iLen%s, s%s);", ptValue->psValue, ptValue->psValue, ptValue->psValue);
         _("");
     }
 
@@ -376,6 +396,10 @@ static void valueBitMapDebug(T_Value *ptValue)
     __(" */\n");
 
     _s();__("if (");
+    if (ptValue->iFlag) {
+        __("!(");
+    }
+
     int iFlag = 0;
     for (i=1; i<=128; i++) {
         if (BITMAP_TEST(ptValue->psValue, i)) {
@@ -388,9 +412,17 @@ static void valueBitMapDebug(T_Value *ptValue)
     storeChar(0, &caFrist, &caLast);
     printfChar(caFrist, caLast, &iFlag);
 
+    if (ptValue->iFlag) {
+        __(")");
+    }
+
     __(") {\n");
 
-    _("    return -1;");
+    if (f_Loop) {
+        _("    break;");
+    } else {
+        _("    return -1;");
+    }
     _("}");
     _("iPos += 1;");
     _("");
@@ -417,7 +449,7 @@ static int printfChar(unsigned char caFrist, unsigned char caLast, int *piFlag)
 
     *piFlag = 1;
     if ('\0' == caLast) {
-        _("(psBuf[iPos] != %s)", sFrist);
+        __("(psBuf[iPos] != %s)", sFrist);
     } else {
         if (isprint(caLast)) {
             sprintf(sLast, "'%c'", caLast);
@@ -459,7 +491,7 @@ static int _s()
 {
     int i = 0;
     for (i=0; i<f_Level; i++) {
-        printf("\t");
+        printf("    ");
     }
 
     return 0;
