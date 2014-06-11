@@ -43,6 +43,7 @@ typedef struct {
     union {
         int iLoop;
         int iFlag;
+        int iLen;
     };
     E_TYPE eType;
 } T_Value;
@@ -51,6 +52,7 @@ typedef void (*FNC_DEBUG)(T_Value *ptValue);
 static int f_Level = 0;
 static int f_Index = 1;
 static int f_Loop = 0;
+static char *f_psName = NULL;
 
 /*---------------------- Local function declaration ---------------------*/
 static int locParse(char *psBuf, H_LIST hList);
@@ -68,45 +70,111 @@ static int printfChar(unsigned char caFrist, unsigned char caLast, int *piFlag);
 static int _s();
 static int _(char *psBuf, ...);
 
+static void valueStringGen(T_Value *ptValue);
+static void valueBitMapGen(T_Value *ptValue);
+static void valueNodeStartGen(T_Value *ptValue);
+static void valueNodeEndGen(T_Value *ptValue);
+
+static int FiledGen(char *psName, char *psValue);
+static int locPrintVar(T_Value *ptValue);
+
 /*-------------------------  Global variable ----------------------------*/
-FNC_DEBUG f_fncDebug[TYPE_NUM] = {
+FNC_DEBUG f_fncParseDebug[TYPE_NUM] = {
     valueStringDebug,
     valueBitMapDebug,
     valueNodeStartDebug,
     valueNodeEndDebug
 };
 
+FNC_DEBUG f_fncGenDebug[TYPE_NUM] = {
+    valueStringGen,
+    valueBitMapGen,
+    valueNodeStartGen,
+    valueNodeEndGen
+};
+
 
 /*-------------------------  Global functions ---------------------------*/
 int main(int argc, char *argv[])
 {
-    H_LIST hList = listNew();
-
-    locParse("1(?:23456)*([a-z]*890)[^;]*", hList);
-
     _("#include <string.h>");
     _("#include <stdio.h>");
     _("");
 
-    _("int locParse(char *psBuf)");
+    _("int parseValue(char *psName, char *psValue, int iLen)");
     _("{");
-    f_Level = 1;
-    _("int iPos = 0;");
-    _("int i = 0;");
-    LIST_LOOP(hList, f_fncDebug[((T_Value *)ptIter)->eType](ptIter));
-    _("return 0;");
-    f_Level = 0;
+    _("    printf(\"%%s:%%.*s\\n\", psName, iLen, psValue);");
+    _("    return 0;");
     _("}");
-
     _("");
+
+    _("int genValue(char *psName, char *psValue, int iMax)");
+    _("{");
+    _("    memcpy(psValue, psName, strlen(psName));");
+    _("    return strlen(psName);");
+    _("}");
+    _("");
+
+    FiledGen("test", "<([0-9]{4})>");
+
     _("int main(int argc, char *argv[]) {");
-    _("    printf(\"%%d\\n\", locParse(\"123456a8901a\"));");
+    _("    printf(\"parse:%%d\\n\", locParse(\"<1234>\"));");
+    _("    char sBuf[100];");
+    _("    memset(sBuf, '\\0', sizeof(sBuf));");
+    _("    int iMax = sizeof(sBuf);");
+    _("    printf(\"gen:%%d\\n\", locGen(sBuf, iMax));");
+    _("    printf(\"%%s\\n\", sBuf);");
     _("}");
 
     return 0;
 }
 
 /*-------------------------  Local functions ----------------------------*/
+static int FiledGen(char *psName, char *psValue)
+{
+    H_LIST hList = listNew();
+    f_psName = psName;
+
+    locParse(psValue, hList);
+
+    /* Parse */
+    _("int locParse(char *psBuf)");
+    _("{");
+    f_Level = 1;
+    _("int iPos = 0;");
+    _("int i = 0;");
+    _("int iRet = 0;");
+    _("");
+
+    LIST_LOOP(hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter));
+
+    _s();__("iRet = parseValue(\"%s\"", psName);LIST_LOOP(hList, locPrintVar(ptIter));__(");\n");
+    _("if ( iRet != 0 ) {");
+    _("    return -1;");
+    _("}");
+    _("");
+    _("return 0;");
+    f_Level = 0;
+    _("}");
+    _("");
+
+    /* Gen */
+    _("int locGen(char *psBuf, int iMax)");
+    _("{");
+    f_Level = 1;
+    _("int iPos = 0;");
+    _("int i = 0;");
+    _("int iRet = 0;");
+    _("");
+    LIST_LOOP(hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter));
+    _("return iPos;");
+    f_Level = 0;
+    _("}");
+    _("");
+    
+    return 0;
+}
+
 static int locParse(char *psBuf, H_LIST hList)
 {
     T_Value *ptLastNode = NULL;
@@ -118,7 +186,7 @@ static int locParse(char *psBuf, H_LIST hList)
         char *pStart = pCur;
         while (1) {
             char caTemp = *pCur;
-            if (caTemp != '.' && caTemp != '[' && caTemp != '(' && caTemp != ')' && caTemp != '{') {
+            if (caTemp != '.' && caTemp != '[' && caTemp != '(' && caTemp != ')' && caTemp != '{' && caTemp != '\0') {
                 pCur += 1;
                 continue;
             }
@@ -132,7 +200,8 @@ static int locParse(char *psBuf, H_LIST hList)
 
         /* . */
         if ('.' == *pCur) {
-            pCur = setLoop(valueNew(TYPE_BITMAP, getBitMap(NULL, NULL, NULL), _DLEN_BITMAP), hList, pCur+1);
+            T_Value * ptLast = valueNew(TYPE_BITMAP, NULL, _DLEN_BITMAP);
+            pCur = setLoop(ptLast, hList, pCur+1);
             continue;
         }
 
@@ -180,6 +249,10 @@ static int locParse(char *psBuf, H_LIST hList)
             ptLastNode = NULL;
             continue;
         }
+
+        if ('\0' == *pCur) {
+            break;
+        }
     }
 
     return 0;
@@ -200,6 +273,9 @@ static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
 
     if (NULL == hList) {
         ptValue->iLoop = iLoop;
+    } else if ( iLoop != -1 && TYPE_BITMAP == ptValue->eType && NULL == ptValue->psValue) {
+        ptValue->iLoop = iLoop;
+        listAdd(hList, ptValue);
     } else {
         T_Value *ptStart = valueNew(TYPE_NODE_START, NULL, 0);
         T_Value *ptEnd = valueNew(TYPE_NODE_END, NULL, 0);
@@ -235,15 +311,6 @@ static char * getBitMap(char *psBuf, int *piFlag, int *piLen)
     static char sBitMap[_DLEN_BITMAP];
 
     memset(sBitMap, '\0', sizeof(sBitMap));
-    if (NULL == psBuf) {
-        unsigned int i = 1;
-        for (i=1; i<=_NUM_BITMAP; i++) {
-            BITMAP_SET(sBitMap, i);
-        }
-
-        return sBitMap;
-    }
-
     int iLen = 0;
     if (NULL != piFlag) {
         *piFlag = 0;
@@ -289,6 +356,8 @@ static char * getBitMap(char *psBuf, int *piFlag, int *piLen)
 static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen)
 {
     T_Value *ptValue = malloc(sizeof(T_Value));
+    memset(ptValue, '\0', sizeof(T_Value));
+
     ptValue->eType = eType;
     ptValue->iLoop = 1;
 
@@ -351,7 +420,6 @@ static void valueNodeEndDebug(T_Value *ptValue)
     if (NULL != ptValue->psValue) {
         _("/* [get end] %s */", ptValue->psValue);
         _("int iLen%s = psBuf + iPos - s%s;", ptValue->psValue, ptValue->psValue);
-        _("printf(\"%s:[%%.*s]\\n\", iLen%s, s%s);", ptValue->psValue, ptValue->psValue, ptValue->psValue);
         _("");
     }
 
@@ -365,6 +433,14 @@ static void valueNodeEndDebug(T_Value *ptValue)
 
 static void valueBitMapDebug(T_Value *ptValue)
 {
+    if (NULL == ptValue->psValue) {
+        _("/* [bitmap][%d] . */", ptValue->iLoop);
+        _("iPos += %d;", ptValue->iLoop);
+        _("");
+
+        return;
+    }
+
     unsigned char caFrist;
     unsigned char caLast;
     _s();__("/* [bitmap]");
@@ -510,6 +586,89 @@ static int _(char *psBuf, ...)
     printf("\n");
 
 	return iRet;
+}
+
+static void valueStringGen(T_Value *ptValue)
+{
+    if (f_Loop) {
+        return;
+    }
+
+    _("/* [string] \"%s\" */", ptValue->psValue);
+
+    _("if (iPos + %d > iMax) {", strlen(ptValue->psValue));
+    _("    return -1;");
+    _("}");
+    if (1 == strlen(ptValue->psValue)) {
+        _("psBuf[iPos] = '%s';", ptValue->psValue);
+    } else {
+        _("memcpy(psBuf+iPos, \"%s\", %d);", ptValue->psValue, strlen(ptValue->psValue));
+    }
+    _("iPos += %d;", strlen(ptValue->psValue));
+    _("");
+}
+
+static void valueBitMapGen(T_Value *ptValue)
+{
+    if (f_Loop) {
+        return;
+    }
+
+    _("/* [bitmap] not do */");
+    _("");
+}
+
+static void valueNodeStartGen(T_Value *ptValue)
+{
+    if (ptValue->iLoop != 1) {
+        if (ptValue->iLoop < 0) {
+            f_Loop += 1;
+        } else {
+            if (!f_Loop) {
+                _("for (i=0; i<%d; i++) {", ptValue->iLoop);
+                f_Level += 1;
+            }
+        }
+    }
+
+    if (NULL != ptValue->psValue) {
+        f_Loop += 1;
+    }
+}
+
+static void valueNodeEndGen(T_Value *ptValue)
+{
+    if (ptValue->iLoop != 1) {
+        if (ptValue->iLoop < 0) {
+            f_Loop -= 1;
+        } else {
+            if (!f_Loop) {
+                f_Level -= 1;
+                _("}");
+            }
+        }
+    }
+
+    if (NULL != ptValue->psValue) {
+        f_Loop -= 1;
+        _("iRet = genValue(\"%s\", psBuf + iPos, iMax);", f_psName);
+        _("if ( iRet < 0 ) {");
+        _("    return -1;");
+        _("}");
+        _("iPos += iRet;");
+        _("");
+    }
+}
+
+static int locPrintVar(T_Value *ptValue)
+{
+    if (TYPE_NODE_START != ptValue->eType || ptValue->psValue == NULL) {
+        return 0;
+    }
+
+    __(", s%s, iLen%s", ptValue->psValue, ptValue->psValue);
+
+    return 0;
 }
 
 /*-----------------------------  End ------------------------------------*/
