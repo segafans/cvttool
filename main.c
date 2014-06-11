@@ -48,6 +48,11 @@ typedef struct {
     E_TYPE eType;
 } T_Value;
 
+typedef struct {
+    char *psName;
+    H_LIST hList;
+} T_Field;
+
 typedef void (*FNC_DEBUG)(T_Value *ptValue);
 static int f_Level = 0;
 static int f_Index = 1;
@@ -75,8 +80,12 @@ static void valueBitMapGen(T_Value *ptValue);
 static void valueNodeStartGen(T_Value *ptValue);
 static void valueNodeEndGen(T_Value *ptValue);
 
-static int FiledGen(char *psName, char *psValue);
+static int fieldGenCodeParse(H_LIST hFieldList);
+static int fieldGenCodeGen(H_LIST hFieldList);
 static int locPrintVar(T_Value *ptValue);
+static T_Field * filedParse(char *psName, char *psValue);
+static int fieldGenCodeParseOne(T_Field *ptField);
+static int fieldGenCodeGenOne(T_Field *ptField);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_DEBUG f_fncParseDebug[TYPE_NUM] = {
@@ -115,10 +124,14 @@ int main(int argc, char *argv[])
     _("}");
     _("");
 
-    FiledGen("test", "<([0-9]{4})>");
+    H_LIST hFieldList = listNew();
+    listAdd(hFieldList, filedParse("test1", "(.{10})"));
+    listAdd(hFieldList, filedParse("test2", "test2=(.{5})"));
+    fieldGenCodeParse(hFieldList);
+    fieldGenCodeGen(hFieldList);
 
     _("int main(int argc, char *argv[]) {");
-    _("    printf(\"parse:%%d\\n\", locParse(\"<1234>\"));");
+    _("    printf(\"parse:%%d\\n\", locParse(\"1234567890test2=12345\"));");
     _("    char sBuf[100];");
     _("    memset(sBuf, '\\0', sizeof(sBuf));");
     _("    int iMax = sizeof(sBuf);");
@@ -130,13 +143,20 @@ int main(int argc, char *argv[])
 }
 
 /*-------------------------  Local functions ----------------------------*/
-static int FiledGen(char *psName, char *psValue)
+static T_Field * filedParse(char *psName, char *psValue)
 {
-    H_LIST hList = listNew();
-    f_psName = psName;
+    T_Field * ptField = malloc(sizeof(T_Field));
+    memset(ptField, '\0', sizeof(T_Field));
 
-    locParse(psValue, hList);
+    ptField->psName = strdup(psName);
+    ptField->hList = listNew();
+    locParse(psValue, ptField->hList);
 
+    return ptField;
+}
+
+static int fieldGenCodeParse(H_LIST hFieldList)
+{
     /* Parse */
     _("int locParse(char *psBuf)");
     _("{");
@@ -146,18 +166,33 @@ static int FiledGen(char *psName, char *psValue)
     _("int iRet = 0;");
     _("");
 
-    LIST_LOOP(hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter));
+    LIST_LOOP(hFieldList, fieldGenCodeParseOne(ptIter));
 
-    _s();__("iRet = parseValue(\"%s\"", psName);LIST_LOOP(hList, locPrintVar(ptIter));__(");\n");
-    _("if ( iRet != 0 ) {");
-    _("    return -1;");
-    _("}");
-    _("");
     _("return 0;");
     f_Level = 0;
     _("}");
     _("");
+    
+    return 0;
+}
 
+static int fieldGenCodeParseOne(T_Field *ptField)
+{
+    _("/*");
+    _(" * FIELD:%s", ptField->psName);
+    _(" */");
+    LIST_LOOP(ptField->hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter));
+    _s();__("iRet = parseValue(\"%s\"", ptField->psName);LIST_LOOP(ptField->hList, locPrintVar(ptIter));__(");\n");
+    _("if ( iRet != 0 ) {");
+    _("    return -1;");
+    _("}");
+    _("");
+
+    return 0;
+}
+
+static int fieldGenCodeGen(H_LIST hFieldList)
+{
     /* Gen */
     _("int locGen(char *psBuf, int iMax)");
     _("{");
@@ -166,12 +201,26 @@ static int FiledGen(char *psName, char *psValue)
     _("int i = 0;");
     _("int iRet = 0;");
     _("");
-    LIST_LOOP(hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter));
+
+    LIST_LOOP(hFieldList, fieldGenCodeGenOne(ptIter));
+
     _("return iPos;");
     f_Level = 0;
     _("}");
     _("");
-    
+
+    return 0;
+}
+
+static int fieldGenCodeGenOne(T_Field *ptField)
+{
+    f_psName = ptField->psName;
+
+    _("/*");
+    _(" * FIELD:%s", ptField->psName);
+    _(" */");
+    LIST_LOOP(ptField->hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter));
+
     return 0;
 }
 
