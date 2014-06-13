@@ -112,6 +112,37 @@ int listAdd(H_LIST ptList, void *ptItem)
     return 0;
 }
 
+int listInsert(H_LIST ptList, void *ptItem, void *ptNew)
+{
+    T_ListNode *ptNode = ptList->ptFrist;
+    T_ListNode *ptLast = NULL;
+    for (; NULL != ptNode; ptLast=ptNode, ptNode=ptNode->ptNext) {
+        if (ptItem == ptNode->ptData) {
+            break;
+        }
+    }
+
+    if (NULL == ptNode) {
+        return -1;
+    }
+
+    T_ListNode *ptNewNode = (T_ListNode *)malloc(sizeof(T_ListNode));
+    ptNewNode->ptData = ptNew;
+    ptNewNode->ptNext = NULL;
+
+    if (NULL == ptLast) {
+        ptList->ptFrist = ptNewNode;
+        ptNewNode->ptNext = ptNode;
+    } else {
+        ptLast->ptNext = ptNewNode;
+        ptNewNode->ptNext = ptNode->ptNext;
+    }
+
+    ptList->iNum += 1;
+    
+    return 0;
+}
+
 int listDel(H_LIST ptList, void *ptItem)
 {
     T_ListNode *ptNode = ptList->ptFrist;

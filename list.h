@@ -42,6 +42,7 @@ extern "C" {
     int listFree(H_LIST ptList);
     int listAdd(H_LIST ptList, void *ptItem);
     int listNum(H_LIST ptList);
+    int listInsert(H_LIST ptList, void *ptItem, void *ptNew);
     int listDel(H_LIST ptList, void *ptItem);
 
     H_LIST_ITER listIterNew(H_LIST ptList);
