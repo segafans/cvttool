@@ -44,6 +44,7 @@ typedef enum {
     TYPE_LIMIT_END,
     TYPE_QUOTE_START,
     TYPE_QUOTE_END,
+    TYPE_NODE_QUOTE,
     TYPE_NUM
 } E_TYPE;
 
@@ -64,7 +65,7 @@ typedef struct {
     H_LIST hList;
 } T_Field;
 
-typedef void (*FNC_DEBUG)(T_Value *ptValue);
+typedef void (*FNC_PROC)(T_Value *ptValue);
 static int f_Level = 0;
 static int f_Index = 1;
 static int f_Loop = 0;
@@ -93,6 +94,7 @@ static void valueValueStartParse(T_Value *ptValue);
 static void valueValueEndParse(T_Value *ptValue);
 static void valueLimitStartParse(T_Value *ptValue);
 static void valueLimitEndParse(T_Value *ptValue);
+static void valueNodeQuoteParse(T_Value *ptValue);
 
 static void valueStringGen(T_Value *ptValue);
 static void valueBitMapGen(T_Value *ptValue);
@@ -104,16 +106,17 @@ static void valueLimitStartGen(T_Value *ptValue);
 static void valueLimitEndGen(T_Value *ptValue);
 static void valueQuoteStartGen(T_Value *ptValue);
 static void valueQuoteEndGen(T_Value *ptValue);
+static void valueNodeQuoteGen(T_Value *ptValue);
 
-static int fieldGenCodeParse(H_LIST hFieldList);
-static int fieldGenCodeGen(H_LIST hFieldList);
+static int fieldGenCodeParse(char *psNodeName, H_LIST hFieldList);
+static int fieldGenCodeGen(char *psNodeName, H_LIST hFieldList);
 static char * locPrintVar(T_Value *ptValue, char *psVar);
 static T_Field * filedParse(char *psName, char *psValue);
 static int fieldGenCodeParseOne(T_Field *ptField);
 static int fieldGenCodeGenOne(T_Field *ptField);
 
 /*-------------------------  Global variable ----------------------------*/
-FNC_DEBUG f_fncParseDebug[TYPE_NUM] = {
+FNC_PROC f_fncParseDebug[TYPE_NUM] = {
     valueStringParse,
     valueBitMapParse,
     valueNodeStartParse,
@@ -123,10 +126,11 @@ FNC_DEBUG f_fncParseDebug[TYPE_NUM] = {
     valueLimitStartParse,
     valueLimitEndParse,
     valueValueStartParse,
-    valueValueEndParse
+    valueValueEndParse,
+    valueNodeQuoteParse
 };
 
-FNC_DEBUG f_fncGenDebug[TYPE_NUM] = {
+FNC_PROC f_fncGenDebug[TYPE_NUM] = {
     valueStringGen,
     valueBitMapGen,
     valueNodeStartGen,
@@ -136,7 +140,8 @@ FNC_DEBUG f_fncGenDebug[TYPE_NUM] = {
     valueLimitStartGen,
     valueLimitEndGen,
     valueQuoteStartGen,
-    valueQuoteEndGen
+    valueQuoteEndGen,
+    valueNodeQuoteGen
 };
 
 
@@ -175,6 +180,21 @@ int main(int argc, char *argv[])
     _("");
 	_("    return (atoi(sTmp));");
     _("}");
+    _("");
+
+    _("int setNode(char *psName)");
+    _("{");
+    _("    printf(\"enter node[%%s]\\n\", psName);");
+    _("    return 0;");
+    _("}");
+    _("");
+
+    _("int getNode(char *psName)");
+    _("{");
+    _("    printf(\"enter node[%%s]\\n\", psName);");
+    _("    return 0;");
+    _("}");
+    _("");
 
     _("int setValue(char *psName, T_VALUE *ptValue)");
     _("{");
@@ -192,21 +212,26 @@ int main(int argc, char *argv[])
 
     H_LIST hFieldList = listNew();
     listAdd(hFieldList, filedParse("test1", "(?:.* *)<10>"));
-    listAdd(hFieldList, filedParse("test2", "(.{10})"));
+    listAdd(hFieldList, filedParse("test2", "${child}"));
     listAdd(hFieldList, filedParse("test3", "([0-9]{3})(?:<Value>.*)<$1>"));
     //listAdd(hFieldList, filedParse("test4", "(.{$LEN})"));
     listAdd(hFieldList, filedParse("test5", "test2=(.{5})"));
-    listAdd(hFieldList, filedParse("test6", "([a-zA-Z]{20})"));
-    fieldGenCodeParse(hFieldList);
-    fieldGenCodeGen(hFieldList);
+    listAdd(hFieldList, filedParse("test6", "([a-zA-Z]{3})"));
+    fieldGenCodeParse("msg", hFieldList);
+    fieldGenCodeGen("msg", hFieldList);
+
+    H_LIST hChildList = listNew();
+    listAdd(hChildList, filedParse("child1", "(.{10})"));
+    fieldGenCodeParse("child", hChildList);
+    fieldGenCodeGen("child", hChildList);
 
     _("int main(int argc, char *argv[]) {");
-    _("    char *psInBuf = \"1234567890test2=12345\";");
-    _("    printf(\"parse:%%d\\n\", locParse(psInBuf, strlen(psInBuf)));");
+    _("    char *psInBuf = \"12345678900987654321002zytest2=12345ABC\";");
+    _("    printf(\"parse:%%d\\n\", msgParse(psInBuf, strlen(psInBuf)));");
     _("    char sBuf[100];");
     _("    memset(sBuf, '\\0', sizeof(sBuf));");
     _("    int iMax = sizeof(sBuf);");
-    _("    printf(\"gen:%%d\\n\", locGen(sBuf, iMax));");
+    _("    printf(\"gen:%%d\\n\", msgGen(sBuf, iMax));");
     _("    printf(\"%%s\\n\", sBuf);");
     _("}");
 
@@ -229,10 +254,10 @@ static T_Field * filedParse(char *psName, char *psValue)
     return ptField;
 }
 
-static int fieldGenCodeParse(H_LIST hFieldList)
+static int fieldGenCodeParse(char *psNodeName, H_LIST hFieldList)
 {
     /* Parse */
-    _("int locParse(char *psBuf, int iMax)");
+    _("int %sParse(char *psBuf, int iMax)", psNodeName);
     _("{");
     f_Level = 1;
     _("int iPos = 0;");
@@ -244,7 +269,7 @@ static int fieldGenCodeParse(H_LIST hFieldList)
 
     LIST_LOOP(hFieldList, fieldGenCodeParseOne(ptIter));
 
-    _("return 0;");
+    _("return iPos;");
     f_Level = 0;
     _("}");
     _("");
@@ -254,6 +279,8 @@ static int fieldGenCodeParse(H_LIST hFieldList)
 
 static int fieldGenCodeParseOne(T_Field *ptField)
 {
+    f_psName = ptField->psName;
+
     _("/*");
     _(" * FIELD:%s VALUE:%s", ptField->psName, ptField->psValue);
     _(" */");
@@ -276,10 +303,10 @@ static int fieldGenCodeParseOne(T_Field *ptField)
     return 0;
 }
 
-static int fieldGenCodeGen(H_LIST hFieldList)
+static int fieldGenCodeGen(char *psNodeName, H_LIST hFieldList)
 {
     /* Gen */
-    _("int locGen(char *psBuf, int iMax)");
+    _("int %sGen(char *psBuf, int iMax)", psNodeName);
     _("{");
     f_Level = 1;
     _("int iPos = 0;");
@@ -328,7 +355,7 @@ static int locParse(char *psBuf, H_LIST hList)
         char *pStart = pCur;
         while (1) {
             char caTemp = *pCur;
-            if ('.' == caTemp || '[' == caTemp || '(' == caTemp || ')' == caTemp || '\0' == caTemp ) {
+            if ('.' == caTemp || '[' == caTemp || '(' == caTemp || ')' == caTemp || '\0' == caTemp || '$' == caTemp) {
                 break;
             }
 
@@ -428,6 +455,30 @@ static int locParse(char *psBuf, H_LIST hList)
             pCur = setLoopNode(ptLastNode, ptNodeEnd, hList, pCur+1);
             ptLastNode = NULL;
             continue;
+        }
+
+        /* $ */
+        if ('$' == *pCur) {
+            int iLen = 1;
+            if ( '{' != pCur[iLen] ) {
+                return -4;
+            }
+
+            iLen += 1;
+            while (1) {
+                if ('}' == pCur[iLen] || '\0' == pCur[iLen]) {
+                    iLen += 1;
+                    break;
+                }
+                iLen += 1;
+            }
+
+            if ('\0' == pCur || iLen <= 3) {
+                return -3;
+            }
+
+            T_Value *ptNodeQuote = valueNew(TYPE_NODE_QUOTE, pCur+2, iLen-3);
+            pCur = setLoop(ptNodeQuote, hList, pCur+iLen);
         }
 
         if ('\0' == *pCur) {
@@ -777,6 +828,19 @@ static void valueValueEndParse(T_Value *ptValue)
     _("");
 }
 
+static void valueNodeQuoteParse(T_Value *ptValue)
+{
+    if (NULL != f_psName) {
+        _("setNode(\"%s\");", f_psName);
+    }
+
+    _("iRet = %sParse(psBuf+iPos, iMax-iPos);", ptValue->psValue);
+    _("if ( iRet < 0 ) {");
+    _("    return -3;");
+    _("}");
+    _("iPos += iRet;");
+}
+
 static void valueBitMapParse(T_Value *ptValue)
 {
     if (NULL == ptValue->psValue) {
@@ -1108,6 +1172,19 @@ static void valueQuoteEndGen(T_Value *ptValue)
     _("/* [quote end] %s */", ptValue->psValue);
     _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->psValue, ptValue->psValue);
     _("");
+}
+
+static void valueNodeQuoteGen(T_Value *ptValue)
+{
+    if (NULL != f_psName) {
+        _("getNode(\"%s\");", f_psName);
+    }
+
+    _("iRet = %sGen(psBuf+iPos, iMax-iPos);", ptValue->psValue);
+    _("if ( iRet < 0 ) {");
+    _("    return -3;");
+    _("}");
+    _("iPos += iRet;");
 }
 
 /*-----------------------------  End ------------------------------------*/
