@@ -31,6 +31,8 @@ do { \
 typedef struct List * H_LIST;
 typedef struct ListIter * H_LIST_ITER;
 
+typedef int (*FNC_COMPARE)(void *ptFrist, void *ptSecond);
+
 /*---------------------- Global variable declaration---------------------*/
 
 /*---------------------- Global function declaration --------------------*/
@@ -44,6 +46,8 @@ extern "C" {
     int listNum(H_LIST ptList);
     int listInsert(H_LIST ptList, void *ptItem, void *ptNew);
     int listDel(H_LIST ptList, void *ptItem);
+    int listSort(H_LIST ptList, FNC_COMPARE fncCompare);
+    void * listFrist(H_LIST ptList);
 
     H_LIST_ITER listIterNew(H_LIST ptList);
     H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter);

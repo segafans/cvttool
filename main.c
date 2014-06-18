@@ -69,6 +69,7 @@ typedef void (*FNC_PROC)(T_Value *ptValue);
 static int f_Level = 0;
 static int f_Index = 1;
 static int f_Loop = 0;
+static int f_PreCheck = 0;
 static char *f_psName = NULL;
 
 /*---------------------- Local function declaration ---------------------*/
@@ -85,6 +86,7 @@ static int _s();
 static int _(char *psBuf, ...);
 static char * setLoopNode(T_Value *ptStartNode, T_Value *ptEndNode, H_LIST hList, char *pCur);
 static int setQuote(T_Value *ptValue, char *psVarName);
+static int FiledSort(void *ptFrist, void *ptSecond);
 
 static void valueStringParse(T_Value *ptValue);
 static void valueBitMapParse(T_Value *ptValue);
@@ -114,6 +116,10 @@ static char * locPrintVar(T_Value *ptValue, char *psVar);
 static T_Field * filedParse(char *psName, char *psValue);
 static int fieldGenCodeParseOne(T_Field *ptField);
 static int fieldGenCodeGenOne(T_Field *ptField);
+static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList);
+static int getSameNum(T_Field *ptFrist, T_Field *ptSecond);
+static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField);
+static int fieldCodeGenOneUnSort(T_Field *ptField);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
@@ -212,11 +218,12 @@ int main(int argc, char *argv[])
 
     H_LIST hFieldList = listNew();
     listAdd(hFieldList, filedParse("test1", "(?:.* *)<10>"));
-    listAdd(hFieldList, filedParse("test2", "${child}"));
+    listAdd(hFieldList, filedParse("child", "${child}"));
     listAdd(hFieldList, filedParse("test3", "([0-9]{3})(?:<Value>.*)<$1>"));
     //listAdd(hFieldList, filedParse("test4", "(.{$LEN})"));
     listAdd(hFieldList, filedParse("test5", "test2=(.{5})"));
     listAdd(hFieldList, filedParse("test6", "([a-zA-Z]{3})"));
+    listAdd(hFieldList, filedParse("unsort", "${unsort}"));
     fieldGenCodeParse("msg", hFieldList);
     fieldGenCodeGen("msg", hFieldList);
 
@@ -224,6 +231,16 @@ int main(int argc, char *argv[])
     listAdd(hChildList, filedParse("child1", "(.{10})"));
     fieldGenCodeParse("child", hChildList);
     fieldGenCodeGen("child", hChildList);
+
+    H_LIST hUnSortList = listNew();
+    listAdd(hUnSortList, filedParse("unsort1", ":111:([^:]*)"));
+    listAdd(hUnSortList, filedParse("unsort1", ":122:([^:]*)"));
+    listAdd(hUnSortList, filedParse("unsort1", ":123:([^:]*)"));
+    listAdd(hUnSortList, filedParse("unsort2", ":134:([^:]*)"));
+    listAdd(hUnSortList, filedParse("unsort2", ":133:([^:]*)"));
+    listAdd(hUnSortList, filedParse("unsort2", ":233:([^:]*)"));
+    fieldGenCodeParseUnSort("unsort", hUnSortList);
+    fieldGenCodeGen("unsort", hUnSortList);
 
     _("int main(int argc, char *argv[]) {");
     _("    char *psInBuf = \"12345678900987654321002zytest2=12345ABC\";");
@@ -341,6 +358,152 @@ static int fieldGenCodeGenOne(T_Field *ptField)
     _("");
 
     return 0;
+}
+
+static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
+{
+    /* Parse */
+    _("int %sParse(char *psBuf, int iMax)", psNodeName);
+    _("{");
+    f_Level = 1;
+    _("int iPos = 0;");
+    _("int i = 0;");
+    _("int iRet = 0;");
+    _("int iMaxTemp = 0;");
+    _("int iPosTemp = 0;");
+    _("");
+
+    listSort(hFieldList, FiledSort);
+
+    _("while (1) {");
+    f_Loop += 1;
+    f_Level += 1;
+
+    int iLastSameNum = 0;
+    int iMaxSameNum = -1;
+    T_Field *ptNow = NULL;
+    H_LIST_ITER pListIter = listIterNew(hFieldList);
+    while (1) {
+        void *ptIter = listIterFetch(pListIter);
+        if (NULL == ptIter) {
+            break;
+        }
+
+        T_Field *ptNext = ptIter;
+        if (NULL == ptNow) {
+            ptNow = ptNext;
+            continue;
+        }
+
+        int iSameNum = getSameNum(ptNow, ptNext);
+        iLastSameNum = printfSameNum(iLastSameNum, iSameNum, iMaxSameNum, ptNow);
+        if (iSameNum > iMaxSameNum) {
+            iMaxSameNum = iSameNum;
+        }
+        ptNow = ptNext;
+    }
+    listIterFree(pListIter);
+
+    printfSameNum(iLastSameNum, 0, iMaxSameNum, ptNow);
+
+    f_Level -= 1;
+    f_Loop -= 1;
+    _("}");
+    _("");
+    _("return iPos;");
+    f_Level = 0;
+    _("}");
+    _("");
+
+    return 0;
+}
+
+static int getSameNum(T_Field *ptFrist, T_Field *ptSecond)
+{
+    T_Value *ptFristValue = listFrist(ptFrist->hList);
+    T_Value *ptSecodeValue = listFrist(ptSecond->hList);
+
+    int i = 0;
+    while (1) {
+        if (ptFristValue->psValue[i] != ptSecodeValue->psValue[i]) {
+            break;
+        }
+        i++;
+    }
+
+    return i+1;
+}
+
+static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField)
+{
+    T_Value *pValue = listFrist(ptField->hList);
+
+    if (iLast != 0) {
+        f_Level -= 1;
+        _("} else if ('%c' == psBuf[iPos+%d]) {", pValue->psValue[iLast-1], iLast-1);
+        f_Level += 1;
+        if (iLast > iNow) {
+            f_PreCheck = iNow;
+            fieldCodeGenOneUnSort(ptField);
+        }
+    }
+
+    int i = 0;
+    while (1) {
+        if (iLast + i < iNow) {
+            if (iLast + i >= iMax) {
+                _("if ( iPos + %d >= iMax ) {", iLast+i);
+                _("    break;");
+                _("}");
+            }
+
+            _("if ('%c' == psBuf[iPos+%d]) {", pValue->psValue[iLast+i], iLast+i);
+            i += 1;
+            f_Level += 1;
+        } else if ( iLast + i > iNow ) {
+            f_Level -= 1;
+            _("} else {");
+            _("    break;");
+            _("}");
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if (iLast < iNow) {
+        f_PreCheck = iNow;
+        fieldCodeGenOneUnSort(ptField);
+    }
+
+    return iNow;
+}
+
+static int fieldCodeGenOneUnSort(T_Field *ptField)
+{
+    f_psName = ptField->psName;
+
+    _("/* FIELD:%s VALUE:%s */", ptField->psName, ptField->psValue);
+    LIST_LOOP(ptField->hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter));
+    char *psVar = NULL;
+    LIST_LOOP(ptField->hList, psVar = locPrintVar(ptIter, psVar));
+    if (NULL != psVar) {
+        _("iRet = setValue(\"%s\", &%s);", ptField->psName, psVar);
+        _("if ( iRet != 0 ) {");
+        _("    return -1;");
+        _("}");
+    }
+    _("");
+
+    return 0;
+}
+
+static int FiledSort(void *ptFrist, void *ptSecond)
+{
+    T_Value *ptFristValue = listFrist(((T_Field *)ptFrist)->hList);
+    T_Value *ptSecodeValue = listFrist(((T_Field *)ptSecond)->hList);
+
+    return strcmp(ptFristValue->psValue, ptSecodeValue->psValue);
 }
 
 static int locParse(char *psBuf, H_LIST hList)
@@ -720,7 +883,20 @@ static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen)
 static void valueStringParse(T_Value *ptValue)
 {
     _("/* [string] \"%s\" */", ptValue->psValue);
-    _("if ( iPos + %d > iMax ) {", strlen(ptValue->psValue));
+    if (f_PreCheck == strlen(ptValue->psValue)) {
+        return;
+    }
+
+    char *psStr = ptValue->psValue;
+    int iLen = strlen(ptValue->psValue);
+    if (f_PreCheck > 0) {
+        _("iPos += %d;", f_PreCheck);
+        iLen -= f_PreCheck;
+        psStr += f_PreCheck;
+        f_PreCheck = 0;
+    }
+
+    _("if ( iPos + %d > iMax ) {", iLen);
     if (f_Loop) {
         _("    break;");
     } else {
@@ -728,10 +904,10 @@ static void valueStringParse(T_Value *ptValue)
     }
     _("}");
 
-    if (1 == strlen(ptValue->psValue)) {
-        _("if ('%c' != psBuf[iPos]) {", ptValue->psValue[0]);
+    if (1 == iLen) {
+        _("if ('%c' != psBuf[iPos]) {", psStr[0]);
     } else {
-        _("if (0 != memcmp(psBuf+iPos, \"%s\", %ld)) {", ptValue->psValue, strlen(ptValue->psValue));
+        _("if (0 != memcmp(psBuf+iPos, \"%s\", %ld)) {", psStr, iLen);
     }
 
     if (f_Loop) {
@@ -740,7 +916,7 @@ static void valueStringParse(T_Value *ptValue)
         _("    return -1;");
     }
     _("}");
-    _("iPos += %ld;", strlen(ptValue->psValue));
+    _("iPos += %ld;", iLen);
 
     _("");
 }
