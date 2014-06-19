@@ -49,6 +49,9 @@ extern "C" {
     int listSort(H_LIST ptList, FNC_COMPARE fncCompare);
     void * listFrist(H_LIST ptList);
 
+    int listPush(H_LIST ptList, void *ptItem);
+    void * listPop(H_LIST ptList);
+
     H_LIST_ITER listIterNew(H_LIST ptList);
     H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter);
     void * listIterFetch(H_LIST_ITER ptIter);

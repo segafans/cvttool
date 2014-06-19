@@ -88,6 +88,45 @@ int listFree(H_LIST ptList)
     return 0;
 }
 
+int listPush(H_LIST ptList, void *ptItem)
+{
+    if (NULL == ptList || NULL == ptItem) {
+        return -1;
+    }
+
+    T_ListNode *ptNode = (T_ListNode *)malloc(sizeof(T_ListNode));
+    ptNode->ptData = ptItem;
+    ptNode->ptNext = ptList->ptFrist;
+    ptList->ptFrist = ptNode;
+    ptList->ptLast = ptNode;
+
+    ptList->iNum += 1;
+    
+    return 0;
+}
+
+void * listPop(H_LIST ptList)
+{
+    if (NULL == ptList) {
+        return NULL;
+    }
+
+    if (NULL == ptList->ptFrist) {
+        return NULL;
+    }
+
+    T_ListNode *ptNode = ptList->ptFrist;
+    ptList->ptFrist = ptNode->ptNext;
+    ptList->ptLast = ptNode->ptNext;
+
+    ptList->iNum -= 1;
+
+    void *ptItem = ptNode->ptData;
+    free(ptNode);
+
+    return ptItem;
+}
+
 int listSort(H_LIST ptList, FNC_COMPARE fncCompare)
 {
     T_ListNode *ptNode = ptList->ptFrist->ptNext;
