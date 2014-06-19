@@ -66,6 +66,12 @@ typedef struct {
 } T_Field;
 
 typedef struct {
+    char *psName;
+    H_LIST hList;
+    int iType;
+} T_Msg;
+
+typedef struct {
     int iLoop;
     int iLoopInit;
     int iINum;
@@ -80,7 +86,7 @@ static int f_Level = 0;
 typedef void (*FNC_PROC)(T_Value *ptValue, T_Field_Option *ptOption);
 
 /*---------------------- Local function declaration ---------------------*/
-static int locParse(char *psBuf, H_LIST hList);
+static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList);
 static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
 
 static int storeChar(unsigned char caChar, unsigned char *psFrist, unsigned char *psLast);
@@ -94,6 +100,11 @@ static int _(char *psBuf, ...);
 static char * setLoopNode(T_Value *ptStartNode, T_Value *ptEndNode, H_LIST hList, char *pCur);
 static int setQuote(T_Value *ptValue, char *psVarName);
 static int FiledSort(void *ptFrist, void *ptSecond);
+static T_Msg * msgFind(T_Msg *ptMsg, char *psName, T_Msg *ptRet);
+static int msgFieldAdd(H_LIST ptList, char *psNodeName, char *psVarName, char *psValue);
+static int msgGenCodeFuncDef(T_Msg *ptMsg);
+static int msgGenCode(H_LIST hMsgList);
+static T_Msg * msgGet(H_LIST hMsgList, char *psNodeName);
 
 static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption);
 static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption);
@@ -117,10 +128,10 @@ static void valueQuoteStartGen(T_Value *ptValue, T_Field_Option *ptOption);
 static void valueQuoteEndGen(T_Value *ptValue, T_Field_Option *ptOption);
 static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption);
 
-static int fieldGenCodeParse(char *psNodeName, H_LIST hFieldList);
-static int fieldGenCodeGen(char *psNodeName, H_LIST hFieldList);
+static int fieldGenCodeParse(T_Msg *ptMsg);
+static int fieldGenCodeGen(T_Msg *ptMsg);
 static char * locPrintVar(T_Value *ptValue, char *psVar);
-static T_Field * filedParse(char *psName, char *psValue);
+static T_Field * filedParse(char *psName, char *psValue, H_LIST hMsgList);
 static int fieldGenCodeParseOne(T_Field *ptField);
 static int fieldGenCodeGenOne(T_Field *ptField);
 static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList);
@@ -223,33 +234,26 @@ int main(int argc, char *argv[])
     _("}");
     _("");
 
-    H_LIST hFieldList = listNew();
-    listAdd(hFieldList, filedParse("test1", "(.{10})"));
-    listAdd(hFieldList, filedParse("test6", "(?: *(.*))<10>"));
-    listAdd(hFieldList, filedParse("test6", "([a-zA-Z]{3})"));
-    listAdd(hFieldList, filedParse("test3", "([0-9]{3})(?:<Value>.*)<$1>"));
-    //listAdd(hFieldList, filedParse("test4", "(.{$LEN})"));
-    listAdd(hFieldList, filedParse("test5", "test2=(.{5})"));
-    listAdd(hFieldList, filedParse("child", "${child}"));
-    listAdd(hFieldList, filedParse("unsort", "([0-9])(?:${unsort}){$1}"));
-    fieldGenCodeParse("msg", hFieldList);
-    fieldGenCodeGen("msg", hFieldList);
+    H_LIST hMsgList = listNew();
+    msgFieldAdd(hMsgList, "msg", "test1", "(.{10})");
+    msgFieldAdd(hMsgList, "msg", "test6", "(?: *(.*))<10>");
+    msgFieldAdd(hMsgList, "msg", "test6", "([a-zA-Z]{3})");
+    msgFieldAdd(hMsgList, "msg", "test3", "([0-9]{3})(?:<Value>.*)<$1>");
+    msgFieldAdd(hMsgList, "msg", "test5", "test2=(.{5})");
+    msgFieldAdd(hMsgList, "msg", "child", "${child}");
+    msgFieldAdd(hMsgList, "msg", "unsort", "([0-9])(?:${?unsort}){$1}");
 
-    H_LIST hChildList = listNew();
-    listAdd(hChildList, filedParse("child1", "(.{10})"));
-    listAdd(hChildList, filedParse("child2", "(.{5})"));
-    fieldGenCodeParse("child", hChildList);
-    fieldGenCodeGen("child", hChildList);
+    msgFieldAdd(hMsgList, "child", "child1", "(.{10})");
+    msgFieldAdd(hMsgList, "child", "child2", "(.{5})");
 
-    H_LIST hUnSortList = listNew();
-    listAdd(hUnSortList, filedParse("unsort1", ":111:([^:]*)"));
-    listAdd(hUnSortList, filedParse("unsort1", ":122:([^:]*)"));
-    listAdd(hUnSortList, filedParse("unsort1", ":123:([^:]*)"));
-    listAdd(hUnSortList, filedParse("unsort2", ":134:([^:]*)"));
-    listAdd(hUnSortList, filedParse("unsort2", ":133:([^:]*)"));
-    listAdd(hUnSortList, filedParse("unsort2", ":233:([^:]*)"));
-    fieldGenCodeParseUnSort("unsort", hUnSortList);
-    fieldGenCodeGen("unsort", hUnSortList);
+    msgFieldAdd(hMsgList, "unsort", "unsort1", ":111:([^:]*)");
+    msgFieldAdd(hMsgList, "unsort", "unsort1", ":122:([^:]*)");
+    msgFieldAdd(hMsgList, "unsort", "unsort1", ":123:([^:]*)");
+    msgFieldAdd(hMsgList, "unsort", "unsort2", ":134:([^:]*)");
+    msgFieldAdd(hMsgList, "unsort", "unsort2", ":133:([^:]*)");
+    msgFieldAdd(hMsgList, "unsort", "unsort2", ":233:([^:]*)");
+
+    msgGenCode(hMsgList);
 
     _("int main(int argc, char *argv[]) {");
     _("    char *psInBuf = \"12345678900987654321002zytest2=12345ABC\";");
@@ -265,7 +269,59 @@ int main(int argc, char *argv[])
 }
 
 /*-------------------------  Local functions ----------------------------*/
-static T_Field * filedParse(char *psName, char *psValue)
+static int msgGenCode(H_LIST hMsgList)
+{
+    LIST_LOOP(hMsgList, msgGenCodeFuncDef(ptIter));
+    _("");
+
+    LIST_LOOP(hMsgList, fieldGenCodeParse(ptIter);fieldGenCodeGen(ptIter));
+
+    return 0;
+}
+
+static int msgGenCodeFuncDef(T_Msg *ptMsg)
+{
+    _("int %sParse(char *psBuf, int iMax, int iPos);", ptMsg->psName);
+    _("int %sGen(char *psBuf, int iMax, int iPos);", ptMsg->psName);
+
+    return 0;
+}
+
+
+static int msgFieldAdd(H_LIST hMsgList, char *psNodeName, char *psVarName, char *psValue)
+{
+    T_Msg *ptMsg = msgGet(hMsgList, psNodeName);
+    listAdd(ptMsg->hList, filedParse(psVarName, psValue, hMsgList));
+
+    return 0;
+}
+
+static T_Msg * msgGet(H_LIST hMsgList, char *psNodeName)
+{
+    T_Msg *ptMsg = NULL;
+    LIST_LOOP(hMsgList, ptMsg = msgFind(ptIter, psNodeName, ptMsg));
+
+    if (NULL == ptMsg) {
+        ptMsg = malloc(sizeof(T_Msg));
+        ptMsg->psName = strdup(psNodeName);
+        ptMsg->hList = listNew();
+        ptMsg->iType = 0;
+        listAdd(hMsgList, ptMsg);
+    }
+
+    return ptMsg;
+}
+
+static T_Msg * msgFind(T_Msg *ptMsg, char *psName, T_Msg *ptRet)
+{
+    if (0 == strcmp(ptMsg->psName, psName)) {
+        return ptMsg;
+    }
+
+    return ptRet;
+}
+
+static T_Field * filedParse(char *psName, char *psValue, H_LIST hMsgList)
 {
     T_Field * ptField = malloc(sizeof(T_Field));
     memset(ptField, '\0', sizeof(T_Field));
@@ -274,21 +330,25 @@ static T_Field * filedParse(char *psName, char *psValue)
     ptField->psValue = strdup(psValue);
     ptField->hList = listNew();
 
-    locParse(psValue, ptField->hList);
+    locParse(psValue, ptField->hList, hMsgList);
 
     return ptField;
 }
 
-static int fieldGenCodeParse(char *psNodeName, H_LIST hFieldList)
+static int fieldGenCodeParse(T_Msg *ptMsg)
 {
+    if (ptMsg->iType) {
+        return fieldGenCodeParseUnSort(ptMsg->psName, ptMsg->hList);
+    }
+
     /* Parse */
-    _("int %sParse(char *psBuf, int iPos, int iMax)", psNodeName);
+    _("int %sParse(char *psBuf, int iPos, int iMax)", ptMsg->psName);
     _("{");
-    _("int iRet = 0;");
     f_Level += 1;
+    _("int iRet = 0;");
     _("");
 
-    LIST_LOOP(hFieldList, fieldGenCodeParseOne(ptIter));
+    LIST_LOOP(ptMsg->hList, fieldGenCodeParseOne(ptIter));
 
     _("return iPos;");
     f_Level -= 1;
@@ -327,16 +387,16 @@ static int fieldGenCodeParseOne(T_Field *ptField)
     return 0;
 }
 
-static int fieldGenCodeGen(char *psNodeName, H_LIST hFieldList)
+static int fieldGenCodeGen(T_Msg *ptMsg)
 {
     /* Gen */
-    _("int %sGen(char *psBuf, int iPos, int iMax)", psNodeName);
+    _("int %sGen(char *psBuf, int iPos, int iMax)", ptMsg->psName);
     _("{");
     f_Level = 1;
     _("int iRet = 0;");
     _("");
 
-    LIST_LOOP(hFieldList, fieldGenCodeGenOne(ptIter));
+    LIST_LOOP(ptMsg->hList, fieldGenCodeGenOne(ptIter));
 
     _("return iPos;");
     f_Level = 0;
@@ -509,7 +569,7 @@ static int FiledSort(void *ptFrist, void *ptSecond)
     return strcmp(ptFristValue->psValue, ptSecodeValue->psValue);
 }
 
-static int locParse(char *psBuf, H_LIST hList)
+static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
 {
     H_LIST hHeap = listNew();
     T_Value *ptLastValue = NULL;
@@ -626,13 +686,19 @@ static int locParse(char *psBuf, H_LIST hList)
 
         /* $ */
         if ('$' == *pCur) {
+            int iFlag = 0;
             int iLen = 1;
             if ( '{' != pCur[iLen] ) {
                 listFree(hHeap);
                 return -4;
             }
-
             iLen += 1;
+
+            if ('?' == pCur[iLen]) {
+                iFlag = 1;
+                iLen += 1;
+            }
+
             while (1) {
                 if ('}' == pCur[iLen] || '\0' == pCur[iLen]) {
                     iLen += 1;
@@ -646,7 +712,9 @@ static int locParse(char *psBuf, H_LIST hList)
                 return -3;
             }
 
-            T_Value *ptNodeQuote = valueNew(TYPE_NODE_QUOTE, pCur+2, iLen-3);
+            T_Value *ptNodeQuote = valueNew(TYPE_NODE_QUOTE, pCur+2+iFlag, iLen-3-iFlag);
+            T_Msg *ptMsg = msgGet(hMsgList, ptNodeQuote->psValue);
+            ptMsg->iType = iFlag;
             pCur = setLoop(ptNodeQuote, hList, pCur+iLen);
         }
 
@@ -1065,11 +1133,11 @@ static void valueNodeQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    _("iRet = %sParse(psBuf+iPos, iMax-iPos);", ptValue->psValue);
+    _("iRet = %sParse(psBuf, iMax, iPos);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
     _("}");
-    _("iPos += iRet;");
+    _("iPos = iRet;");
 }
 
 static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
@@ -1453,11 +1521,11 @@ static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    _("iRet = %sGen(psBuf+iPos, iMax-iPos);", ptValue->psValue);
+    _("iRet = %sGen(psBuf, iMax, iPos);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
     _("}");
-    _("iPos += iRet;");
+    _("iPos = iRet;");
 }
 
 /*-----------------------------  End ------------------------------------*/
