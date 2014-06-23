@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "list.h"
 
@@ -29,8 +31,6 @@
 #define BITMAP_TEST( bitmap, bit ) ((bitmap)[BITMAP_INDEX(bit)]&BITMAP_MASK(bit))
 #define BITMAP_CLR( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]&=~BITMAP_MASK(bit))
 #define BITMAP_SET( bitmap, bit )  (bitmap[BITMAP_INDEX(bit)]|=BITMAP_MASK(bit))
-
-#define __ printf
 
 /*---------------------------- Type define ------------------------------*/
 typedef enum {
@@ -81,11 +81,11 @@ typedef struct {
     int iPreCheck;
     char *psName;
 } T_Field_Option;
-static int f_Level = 0;
 
 typedef void (*FNC_PROC)(T_Value *ptValue, T_Field_Option *ptOption);
 
 /*---------------------- Local function declaration ---------------------*/
+static int genFile(H_LIST hMsgList);
 static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList);
 static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
 
@@ -97,6 +97,7 @@ static int getLoop(char *psBuf, int *piLen, E_TYPE *eStart, E_TYPE *eEnd);
 static int printfChar(unsigned char caFrist, unsigned char caLast, int *piFlag);
 static int _s();
 static int _(char *psBuf, ...);
+static int __(char *psBuf, ...);
 static char * setLoopNode(T_Value *ptStartNode, T_Value *ptEndNode, H_LIST hList, char *pCur);
 static int setQuote(T_Value *ptValue, char *psVarName);
 static int FiledSort(void *ptFrist, void *ptSecond);
@@ -139,6 +140,10 @@ static int getSameNum(T_Field *ptFrist, T_Field *ptSecond);
 static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField);
 static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck);
 
+static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[]);
+static int setOutPutFileByInPutFile(char *psFile);
+static int setOutPutFile(char *psFile);
+
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
     valueStringParse,
@@ -168,9 +173,97 @@ FNC_PROC f_fncGenDebug[TYPE_NUM] = {
     valueNodeQuoteGen
 };
 
+static int f_Level = 0;
+static FILE *f_Fp = NULL;
 
 /*-------------------------  Global functions ---------------------------*/
 int main(int argc, char *argv[])
+{
+    int iRet = 0;
+
+    if (argc <= 1) {
+        return -1;
+    }
+
+    f_Fp = stdout;
+
+    char *psCsvFile = argv[1];
+    FILE *ptFp = fopen(psCsvFile, "r");
+    if (NULL == ptFp) {
+        printf("file[%s] open err[%d:%s]", psCsvFile, errno, strerror(errno));
+        return -2;
+    }
+
+    H_LIST hMsgList = listNew();
+
+    setOutPutFileByInPutFile(psCsvFile);
+
+    char sBuf[_DLEN_HUGE_BUF];
+    while (1) {
+        memset(sBuf, '\0', sizeof(sBuf));
+        if (NULL == fgets(sBuf, sizeof(sBuf), ptFp) ) {
+            break;
+        }
+
+        int iLen = strlen(sBuf);
+        while (iLen >= 0) {
+            if ('\r' == sBuf[iLen-1] || '\n' == sBuf[iLen-1]) {
+                sBuf[iLen-1] = '\0';
+                iLen -= 1;
+                continue;
+            }
+
+            break;
+        }
+
+        enum {
+            FIELD_NODE_NAME,
+            FIELD_VAR_NAME,
+            FIELD_VAR_VALUE,
+            FIELD_BLANK,
+            FIELD_NUM
+        };
+
+        int iNum = FIELD_NUM;
+        char *ppsFiled[FIELD_NUM];
+        iRet = splitN(sBuf, ",", &iNum, ppsFiled);
+        if (iRet != 0) {
+            return -3;
+        }
+
+        msgFieldAdd(hMsgList, ppsFiled[FIELD_NODE_NAME], ppsFiled[FIELD_VAR_NAME], ppsFiled[FIELD_VAR_VALUE]);
+
+        /*
+        msgFieldAdd(hMsgList, "msg", "test1", "(.{10})");
+        msgFieldAdd(hMsgList, "msg", "test6", "(?: *(.*))<10>");
+        msgFieldAdd(hMsgList, "msg", "test6", "([a-zA-Z]{3})");
+        msgFieldAdd(hMsgList, "msg", "test3", "([0-9]{3})(?:<Value>.*)<$1>");
+        msgFieldAdd(hMsgList, "msg", "test5", "test2=(.{5})");
+        msgFieldAdd(hMsgList, "msg", "child", "${child}");
+        msgFieldAdd(hMsgList, "msg", "unsort", "([0-9])(?:${?unsort}){$1}");
+
+        msgFieldAdd(hMsgList, "child", "child1", "(.{10})");
+        msgFieldAdd(hMsgList, "child", "child2", "(.{5})");
+
+        msgFieldAdd(hMsgList, "unsort", "unsort1", ":111:([^:]*)");
+        msgFieldAdd(hMsgList, "unsort", "unsort1", ":122:([^:]*)");
+        msgFieldAdd(hMsgList, "unsort", "unsort1", ":123:([^:]*)");
+        msgFieldAdd(hMsgList, "unsort", "unsort2", ":134:([^:]*)");
+        msgFieldAdd(hMsgList, "unsort", "unsort2", ":133:([^:]*)");
+        msgFieldAdd(hMsgList, "unsort", "unsort2", ":233:([^:]*)");
+         */
+    }
+
+    fclose(ptFp);
+
+    genFile(hMsgList);
+
+    return 0;
+}
+
+
+/*-------------------------  Local functions ----------------------------*/
+static int genFile(H_LIST hMsgList)
 {
     _("#include <string.h>");
     _("#include <stdio.h>");
@@ -234,25 +327,6 @@ int main(int argc, char *argv[])
     _("}");
     _("");
 
-    H_LIST hMsgList = listNew();
-    msgFieldAdd(hMsgList, "msg", "test1", "(.{10})");
-    msgFieldAdd(hMsgList, "msg", "test6", "(?: *(.*))<10>");
-    msgFieldAdd(hMsgList, "msg", "test6", "([a-zA-Z]{3})");
-    msgFieldAdd(hMsgList, "msg", "test3", "([0-9]{3})(?:<Value>.*)<$1>");
-    msgFieldAdd(hMsgList, "msg", "test5", "test2=(.{5})");
-    msgFieldAdd(hMsgList, "msg", "child", "${child}");
-    msgFieldAdd(hMsgList, "msg", "unsort", "([0-9])(?:${?unsort}){$1}");
-
-    msgFieldAdd(hMsgList, "child", "child1", "(.{10})");
-    msgFieldAdd(hMsgList, "child", "child2", "(.{5})");
-
-    msgFieldAdd(hMsgList, "unsort", "unsort1", ":111:([^:]*)");
-    msgFieldAdd(hMsgList, "unsort", "unsort1", ":122:([^:]*)");
-    msgFieldAdd(hMsgList, "unsort", "unsort1", ":123:([^:]*)");
-    msgFieldAdd(hMsgList, "unsort", "unsort2", ":134:([^:]*)");
-    msgFieldAdd(hMsgList, "unsort", "unsort2", ":133:([^:]*)");
-    msgFieldAdd(hMsgList, "unsort", "unsort2", ":233:([^:]*)");
-
     msgGenCode(hMsgList);
 
     _("int main(int argc, char *argv[]) {");
@@ -264,11 +338,10 @@ int main(int argc, char *argv[])
     _("    printf(\"gen:%%d\\n\", msgGen(sBuf, iMax, 0));");
     _("    printf(\"%%s\\n\", sBuf);");
     _("}");
-
+    
     return 0;
 }
 
-/*-------------------------  Local functions ----------------------------*/
 static int msgGenCode(H_LIST hMsgList)
 {
     LIST_LOOP(hMsgList, msgGenCodeFuncDef(ptIter));
@@ -443,9 +516,10 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
     int iLastSameNum = 0;
     int iMaxSameNum = -1;
     T_Field *ptNow = NULL;
-    H_LIST_ITER pListIter = listIterNew(hFieldList);
+    T_ListIter tIter;
+    listIterInit(&tIter, hFieldList);
     while (1) {
-        void *ptIter = listIterFetch(pListIter);
+        void *ptIter = listIterFetch(&tIter);
         if (NULL == ptIter) {
             break;
         }
@@ -463,7 +537,6 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
         }
         ptNow = ptNext;
     }
-    listIterFree(pListIter);
 
     printfSameNum(iLastSameNum, 0, iMaxSameNum, ptNow);
 
@@ -1310,7 +1383,7 @@ static int _s()
 {
     int i = 0;
     for (i=0; i<f_Level; i++) {
-        printf("    ");
+        fprintf(f_Fp, "    ");
     }
 
     return 0;
@@ -1324,9 +1397,21 @@ static int _(char *psBuf, ...)
     _s();
 
 	va_start(vaArgs, psBuf);
-	iRet = vprintf(psBuf, vaArgs);
+	iRet = vfprintf(f_Fp, psBuf, vaArgs);
 	va_end(vaArgs);
-    printf("\n");
+    fprintf(f_Fp, "\n");
+
+	return iRet;
+}
+
+static int __(char *psBuf, ...)
+{
+    va_list	vaArgs;
+	int		iRet;
+
+	va_start(vaArgs, psBuf);
+	iRet = vfprintf(f_Fp, psBuf, vaArgs);
+	va_end(vaArgs);
 
 	return iRet;
 }
@@ -1526,6 +1611,63 @@ static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("    return -3;");
     _("}");
     _("iPos = iRet;");
+}
+
+static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[])
+{
+	char	*pCur;
+	int		iFlag, iMax = *piCnt, iLen = strlen(sSep);
+
+	*piCnt = 0;
+	if (iMax <= 0) return 0;
+
+	pCur = sStr - 1;
+	iFlag = 1;
+
+	while (pCur < sStr || *pCur != '\0') {
+		if (strncmp(pCur, sSep, iLen) == 0) {
+			if (pCur >= sStr) {
+				*pCur = '\0';
+				pCur += iLen - 1;
+				iFlag = 1;
+			}
+		}
+
+		if (iFlag) {
+			psCol[(*piCnt)++] = pCur + 1;
+			if (*piCnt >= iMax) return 1;
+			iFlag = 0;
+		}
+
+		pCur++;
+	}
+    
+	return 0;
+}
+
+static int setOutPutFileByInPutFile(char *psFile)
+{
+    char *psOutFile = strdup(psFile);
+    char *p = strrchr(psOutFile, '.');
+    if (NULL == p) {
+        return -1;
+    }
+
+    p[1] = 'c';
+    p[2] = '\0';
+
+    return setOutPutFile(psOutFile);
+}
+
+static int setOutPutFile(char *psFile)
+{
+    f_Fp = fopen(psFile, "w");
+    if (NULL == f_Fp) {
+        printf("file[%s] open err[%d:%s]\n", psFile, errno, strerror(errno));
+        return -1;
+    }
+
+    return 0;
 }
 
 /*-----------------------------  End ------------------------------------*/

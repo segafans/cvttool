@@ -15,21 +15,23 @@
 /*--------------------------- Macro define ------------------------------*/
 #define LIST_LOOP(list, fnc) \
 do { \
-    H_LIST_ITER pListIter = listIterNew(list); \
+    T_ListIter tListIter; \
+    listIterInit(&tListIter, (list)); \
     while (1) { \
-        void *ptIter = listIterFetch(pListIter); \
+        void *ptIter = listIterFetch(&tListIter); \
         if (NULL == ptIter) { \
             break; \
         } \
         \
         fnc; \
     } \
-    listIterFree(pListIter); \
 } while(0);
 
 /*---------------------------- Type define ------------------------------*/
 typedef struct List * H_LIST;
-typedef struct ListIter * H_LIST_ITER;
+typedef struct ListIter {
+    void *ptInfo;
+} T_ListIter;
 
 typedef int (*FNC_COMPARE)(void *ptFrist, void *ptSecond);
 
@@ -44,7 +46,6 @@ extern "C" {
     int listFree(H_LIST ptList);
     int listAdd(H_LIST ptList, void *ptItem);
     int listNum(H_LIST ptList);
-    int listInsert(H_LIST ptList, void *ptItem, void *ptNew);
     int listDel(H_LIST ptList, void *ptItem);
     int listSort(H_LIST ptList, FNC_COMPARE fncCompare);
     void * listFrist(H_LIST ptList);
@@ -52,10 +53,8 @@ extern "C" {
     int listPush(H_LIST ptList, void *ptItem);
     void * listPop(H_LIST ptList);
 
-    H_LIST_ITER listIterNew(H_LIST ptList);
-    H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter);
-    void * listIterFetch(H_LIST_ITER ptIter);
-    int listIterFree(H_LIST_ITER ptIter);
+    int listIterInit(T_ListIter *ptIter, H_LIST hList);
+    void * listIterFetch(T_ListIter *ptIter);
 
 #ifdef __cplusplus
 }

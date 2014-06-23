@@ -32,21 +32,13 @@ typedef struct ListNode {
     struct ListNode *ptNext;
 } T_ListNode;
 
-typedef struct ListIter {
-    int iStatus;
-    T_ListNode *ptCur;
-    struct ListIter *ptNext;
-} T_ListIter;
-
 typedef struct List {
     int iNum;
     T_ListNode *ptFrist;
     T_ListNode *ptLast;
-    T_ListIter *ptIter;
 } T_List;
 
 /*---------------------- Local function declaration ---------------------*/
-static int listIterDebug(H_LIST ptList);
 
 /*-------------------------  Global variable ----------------------------*/
 
@@ -58,7 +50,6 @@ H_LIST listNew()
     p->iNum = 0;
     p->ptFrist = NULL;
     p->ptLast = NULL;
-    p->ptIter = NULL;
 
     return p;
 }
@@ -74,13 +65,6 @@ int listFree(H_LIST ptList)
         T_ListNode *ptTemp = p->ptNext;
         free(p);
         p = ptTemp;
-    }
-
-    T_ListIter *q = ptList->ptIter;
-    while (q) {
-        T_ListIter *ptTemp = q->ptNext;
-        free(q);
-        q = ptTemp;
     }
 
     free(ptList);
@@ -193,37 +177,6 @@ int listAdd(H_LIST ptList, void *ptItem)
     return 0;
 }
 
-int listInsert(H_LIST ptList, void *ptItem, void *ptNew)
-{
-    T_ListNode *ptNode = ptList->ptFrist;
-    T_ListNode *ptLast = NULL;
-    for (; NULL != ptNode; ptLast=ptNode, ptNode=ptNode->ptNext) {
-        if (ptItem == ptNode->ptData) {
-            break;
-        }
-    }
-
-    if (NULL == ptNode) {
-        return -1;
-    }
-
-    T_ListNode *ptNewNode = (T_ListNode *)malloc(sizeof(T_ListNode));
-    ptNewNode->ptData = ptNew;
-    ptNewNode->ptNext = NULL;
-
-    if (NULL == ptLast) {
-        ptList->ptFrist = ptNewNode;
-        ptNewNode->ptNext = ptNode;
-    } else {
-        ptLast->ptNext = ptNewNode;
-        ptNewNode->ptNext = ptNode->ptNext;
-    }
-
-    ptList->iNum += 1;
-    
-    return 0;
-}
-
 int listDel(H_LIST ptList, void *ptItem)
 {
     T_ListNode *ptNode = ptList->ptFrist;
@@ -243,14 +196,6 @@ int listDel(H_LIST ptList, void *ptItem)
             ptList->ptLast = ptLast;
         }
 
-        T_ListIter *p = ptList->ptIter;
-        while (p) {
-            if (p->ptCur == ptNode) {
-                p->ptCur = ptLast;
-            }
-            p = p->ptNext;
-        }
-
         free(ptNode);
         ptList->iNum -= 1;
         break;
@@ -264,67 +209,30 @@ int listNum(H_LIST ptList)
     return ptList->iNum;
 }
 
-H_LIST_ITER listIterCopy(H_LIST ptList, H_LIST_ITER ptIter)
+int listIterInit(T_ListIter *ptIter, H_LIST hList)
 {
-    H_LIST_ITER ptIterRet = listIterNew(ptList);
-    ptIterRet->ptCur = ptIter->ptCur;
-
-    return ptIterRet;
-}
-
-H_LIST_ITER listIterNew(H_LIST ptList)
-{
-    listIterDebug(ptList);
-    T_ListIter *ptIter = ptList->ptIter;
-    while (ptIter) {
-        if (0 == ptIter->iStatus) {
-            break;
-        }
-        ptIter = ptIter->ptNext;
+    if (NULL  == ptIter || NULL == hList) {
+        return -1;
     }
 
-    if (NULL == ptIter) {
-        ptIter = (T_ListIter *)malloc(sizeof(T_ListIter));
-        ptIter->ptNext = ptList->ptIter;
-        ptList->ptIter = ptIter;
-    }
+    ptIter->ptInfo = hList->ptFrist;
 
-    ptIter->ptCur = ptList->ptFrist;
-    ptIter->iStatus = 1;
-
-    return ptIter;
+    return 0;
 }
 
-void * listIterFetch(H_LIST_ITER ptIter)
+void * listIterFetch(T_ListIter *ptIter)
 {
-    if (NULL == ptIter->ptCur || 0 == ptIter->iStatus) {
+    if (NULL == ptIter || NULL == ptIter->ptInfo) {
         return NULL;
     }
 
-    void *p = ptIter->ptCur->ptData;
-    ptIter->ptCur = ptIter->ptCur->ptNext;
+    T_ListNode *ptNode = (T_ListNode *)ptIter->ptInfo;
+    ptIter->ptInfo = ptNode->ptNext;
 
-    return p;
-}
-
-int listIterFree(H_LIST_ITER ptIter)
-{
-    ptIter->iStatus = 0;
-
-    return 0;
+    return ptNode->ptData;
 }
 
 /*-------------------------  Local functions ----------------------------*/
-
-static int listIterDebug(H_LIST ptList)
-{
-    T_ListIter *ptIter = ptList->ptIter;
-    while (ptIter) {
-        ptIter = ptIter->ptNext;
-    }
-
-    return 0;
-}
 
 /*-----------------------------  End ------------------------------------*/
 
