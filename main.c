@@ -232,26 +232,6 @@ int main(int argc, char *argv[])
         }
 
         msgFieldAdd(hMsgList, ppsFiled[FIELD_NODE_NAME], ppsFiled[FIELD_VAR_NAME], ppsFiled[FIELD_VAR_VALUE]);
-
-        /*
-        msgFieldAdd(hMsgList, "msg", "test1", "(.{10})");
-        msgFieldAdd(hMsgList, "msg", "test6", "(?: *(.*))<10>");
-        msgFieldAdd(hMsgList, "msg", "test6", "([a-zA-Z]{3})");
-        msgFieldAdd(hMsgList, "msg", "test3", "([0-9]{3})(?:<Value>.*)<$1>");
-        msgFieldAdd(hMsgList, "msg", "test5", "test2=(.{5})");
-        msgFieldAdd(hMsgList, "msg", "child", "${child}");
-        msgFieldAdd(hMsgList, "msg", "unsort", "([0-9])(?:${?unsort}){$1}");
-
-        msgFieldAdd(hMsgList, "child", "child1", "(.{10})");
-        msgFieldAdd(hMsgList, "child", "child2", "(.{5})");
-
-        msgFieldAdd(hMsgList, "unsort", "unsort1", ":111:([^:]*)");
-        msgFieldAdd(hMsgList, "unsort", "unsort1", ":122:([^:]*)");
-        msgFieldAdd(hMsgList, "unsort", "unsort1", ":123:([^:]*)");
-        msgFieldAdd(hMsgList, "unsort", "unsort2", ":134:([^:]*)");
-        msgFieldAdd(hMsgList, "unsort", "unsort2", ":133:([^:]*)");
-        msgFieldAdd(hMsgList, "unsort", "unsort2", ":233:([^:]*)");
-         */
     }
 
     fclose(ptFp);
@@ -265,79 +245,9 @@ int main(int argc, char *argv[])
 /*-------------------------  Local functions ----------------------------*/
 static int genFile(H_LIST hMsgList)
 {
-    _("#include <string.h>");
-    _("#include <stdio.h>");
-    _("");
-    _("#define	min(x,y)		((x) < (y) ? (x) : (y))");
-    _("");
-    _("typedef struct {");
-    _("    char *psValue;");
-    _("    int iLen;");
-    _("} T_VALUE;");
-    _("");
-
-    _("char *strInt2Str(int nNum, char *sBuf, size_t nBufLen)");
-    _("{");
-	_("    char sTmp[32];");
-	_("    int  nLen = nBufLen;");
-    _("");
-	_("    sprintf(sTmp, \"%%0*d\", nLen, nNum);");
-	_("    memcpy(sBuf, sTmp, nBufLen);");
-    _("");
-	_("    return (sBuf);");
-    _("}");
-
-    _("");
-    _("int strStr2Int(char *sBuf, size_t nBufLen)");
-    _("{");
-	_("    char sTmp[32];");
-    _("");
-	_("    memset(sTmp, '\\0', sizeof(sTmp));");
-	_("    memcpy(sTmp, sBuf, min(nBufLen, sizeof(sTmp) - 1));");
-    _("");
-	_("    return (atoi(sTmp));");
-    _("}");
-    _("");
-
-    _("int setNode(char *psName)");
-    _("{");
-    _("    printf(\"enter node[%%s]\\n\", psName);");
-    _("    return 0;");
-    _("}");
-    _("");
-
-    _("int getNode(char *psName)");
-    _("{");
-    _("    printf(\"enter node[%%s]\\n\", psName);");
-    _("    return 0;");
-    _("}");
-    _("");
-
-    _("int setValue(char *psName, T_VALUE *ptValue)");
-    _("{");
-    _("    printf(\"%%s:%%.*s\\n\", psName, ptValue->iLen, ptValue->psValue);");
-    _("    return 0;");
-    _("}");
-    _("");
-
-    _("int getValue(char *psName, char *psValue, int iMax)");
-    _("{");
-    _("    memcpy(psValue, psName, strlen(psName));");
-    _("    return strlen(psName);");
-    _("}");
-    _("");
+    _("#include \"main.h\"");
 
     msgGenCode(hMsgList);
-
-    _("int main(int argc, char *argv[]) {");
-    _("    char *psInBuf = \"12345678900987654321002zytest2=12345ABC\";");
-    _("    printf(\"parse:%%d\\n\", msgParse(psInBuf, strlen(psInBuf), 0));");
-    _("    char sBuf[100];");
-    _("    memset(sBuf, '\\0', sizeof(sBuf));");
-    _("    int iMax = sizeof(sBuf);");
-    _("    printf(\"gen:%%d\\n\", msgGen(sBuf, iMax, 0));");
-    _("    printf(\"%%s\\n\", sBuf);");
-    _("}");
     
     return 0;
 }
@@ -410,6 +320,10 @@ static T_Field * filedParse(char *psName, char *psValue, H_LIST hMsgList)
 
 static int fieldGenCodeParse(T_Msg *ptMsg)
 {
+    if (0 == listNum(ptMsg->hList)) {
+        return 0;
+    }
+
     if (ptMsg->iType) {
         return fieldGenCodeParseUnSort(ptMsg->psName, ptMsg->hList);
     }
@@ -462,6 +376,10 @@ static int fieldGenCodeParseOne(T_Field *ptField)
 
 static int fieldGenCodeGen(T_Msg *ptMsg)
 {
+    if (0 == listNum(ptMsg->hList)) {
+        return 0;
+    }
+
     /* Gen */
     _("int %sGen(char *psBuf, int iPos, int iMax)", ptMsg->psName);
     _("{");
@@ -508,7 +426,7 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
     _("int iRet = 0;");
     _("");
 
-    listSort(hFieldList, FiledSort);
+    H_LIST hSortFieldList = listSort(hFieldList, FiledSort);
 
     _("while (1) {");
     f_Level += 1;
@@ -517,7 +435,7 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
     int iMaxSameNum = -1;
     T_Field *ptNow = NULL;
     T_ListIter tIter;
-    listIterInit(&tIter, hFieldList);
+    listIterInit(&tIter, hSortFieldList);
     while (1) {
         void *ptIter = listIterFetch(&tIter);
         if (NULL == ptIter) {
@@ -525,6 +443,7 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
         }
 
         T_Field *ptNext = ptIter;
+        printf("%s\n", ptNext->psValue);
         if (NULL == ptNow) {
             ptNow = ptNext;
             continue;
@@ -575,7 +494,7 @@ static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField)
         f_Level -= 1;
         _("} else if ('%c' == psBuf[iPos+%d]) {", pValue->psValue[iLast-1], iLast-1);
         f_Level += 1;
-        if (iLast > iNow) {
+        if (iLast >= iNow) {
             fieldCodeGenOneUnSort(ptField, iNow);
         }
     }
@@ -1206,7 +1125,7 @@ static void valueNodeQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    _("iRet = %sParse(psBuf, iMax, iPos);", ptValue->psValue);
+    _("iRet = %sParse(psBuf, iPos, iMax);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
     _("}");
@@ -1606,7 +1525,7 @@ static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    _("iRet = %sGen(psBuf, iMax, iPos);", ptValue->psValue);
+    _("iRet = %sGen(psBuf, iPos, iMax);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
     _("}");

@@ -39,6 +39,7 @@ typedef struct List {
 } T_List;
 
 /*---------------------- Local function declaration ---------------------*/
+static T_ListNode * _newListNode(void *ptItem);
 
 /*-------------------------  Global variable ----------------------------*/
 
@@ -111,13 +112,18 @@ void * listPop(H_LIST ptList)
     return ptItem;
 }
 
-int listSort(H_LIST ptList, FNC_COMPARE fncCompare)
+H_LIST listSort(H_LIST ptOldList, FNC_COMPARE fncCompare)
 {
-    T_ListNode *ptNode = ptList->ptFrist->ptNext;
-    ptList->ptFrist->ptNext = NULL;
+    H_LIST ptList = listNew();
+
+    T_ListNode *ptNode = ptOldList->ptFrist->ptNext;
+
+    ptList->ptFrist = _newListNode(ptOldList->ptFrist->ptData);
+    ptList->ptLast = ptList->ptFrist;
+    ptList->iNum = 1;
 
     while (NULL != ptNode) {
-        T_ListNode *ptNew = ptNode;
+        T_ListNode *ptNew = _newListNode(ptNode->ptData);
         ptNode = ptNode->ptNext;
 
         T_ListNode *ptLast = NULL;
@@ -142,10 +148,13 @@ int listSort(H_LIST ptList, FNC_COMPARE fncCompare)
         if (NULL == ptNow) {
             ptNew->ptNext = ptLast->ptNext;
             ptLast->ptNext = ptNew;
+            ptList->ptLast = ptNew;
         }
+
+        ptList->iNum += 1;
     }
 
-    return 0;
+    return ptList;
 }
 
 void * listFrist(H_LIST ptList)
@@ -233,6 +242,14 @@ void * listIterFetch(T_ListIter *ptIter)
 }
 
 /*-------------------------  Local functions ----------------------------*/
+static T_ListNode * _newListNode(void *ptItem)
+{
+    T_ListNode *ptNode = (T_ListNode *)malloc(sizeof(T_ListNode));
+    ptNode->ptData = ptItem;
+    ptNode->ptNext = NULL;
+
+    return ptNode;
+}
 
 /*-----------------------------  End ------------------------------------*/
 

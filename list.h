@@ -47,7 +47,7 @@ extern "C" {
     int listAdd(H_LIST ptList, void *ptItem);
     int listNum(H_LIST ptList);
     int listDel(H_LIST ptList, void *ptItem);
-    int listSort(H_LIST ptList, FNC_COMPARE fncCompare);
+    H_LIST listSort(H_LIST ptOldList, FNC_COMPARE fncCompare);
     void * listFrist(H_LIST ptList);
 
     int listPush(H_LIST ptList, void *ptItem);
