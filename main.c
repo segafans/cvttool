@@ -26,6 +26,8 @@
 #define _LOOP_UNLIMITED  (-1)
 #define _LOOP_VAR        (-2)
 
+#define _BOOL_YES         1
+
 #define BITMAP_MASK( bit )         (0x80>>(((bit)-1)&0x07))
 #define BITMAP_INDEX( bit )        (((bit)-1)>>3)
 #define BITMAP_TEST( bitmap, bit ) ((bitmap)[BITMAP_INDEX(bit)]&BITMAP_MASK(bit))
@@ -60,6 +62,7 @@ typedef struct {
         struct {
             int iLoop;
             char *psVar;
+            int iNode;
         } tNode;
         struct {
             int iMaxLen;
@@ -101,6 +104,7 @@ static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
 static int storeChar(unsigned char caChar, unsigned char *psFrist, unsigned char *psLast);
 static char * getBitMap(char *psBuf, int *piFlag, int *piLen);
 static char * setLoop(T_Value *ptValue, H_LIST ptList, char *pCur);
+static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, H_LIST hHeap, char *pCur);
 static char * getVarName(char *psBuf, int iLen, H_LIST hList);
 static int getLoop(char *psBuf, int *piLen, E_TYPE *eStart, E_TYPE *eEnd);
 static int printfChar(unsigned char caFrist, unsigned char caLast, int *piFlag);
@@ -152,6 +156,8 @@ static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck);
 static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[]);
 static int setOutPutFileByInPutFile(char *psFile);
 static int setOutPutFile(char *psFile);
+static T_Value * NodeLimitInit(T_Value *ptValue, int iNum, char *psVar);
+static int setNodeStartFLag(H_LIST hHeap);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
@@ -718,7 +724,7 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
             T_Value *ptNodeQuote = valueNew(TYPE_NODE_QUOTE, pCur+2+iFlag, iLen-3-iFlag);
             T_Msg *ptMsg = msgGet(hMsgList, ptNodeQuote->psValue);
             ptMsg->iType = iFlag;
-            pCur = setLoop(ptNodeQuote, hList, pCur+iLen);
+            pCur = setLoopNodeQuote(ptNodeQuote, hList, hHeap, pCur+iLen);
         }
 
         if ('\0' == *pCur) {
@@ -744,23 +750,8 @@ static char * setLoopNode(T_Value *ptStart, T_Value *ptEnd, H_LIST hList, char *
         psVarName = getVarName(pCur, iLen, hList);
     }
 
-    ptStart->eType = eStart;
-    if (TYPE_LIMIT_START == eStart) {
-        ptStart->tLimit.iMaxLen = iLoop;
-        ptStart->tLimit.psVar = psVarName;
-    } else {
-        ptStart->tNode.iLoop = iLoop;
-        ptStart->tNode.psVar = psVarName;
-    }
-
-    ptEnd->eType = eEnd;
-    if (TYPE_LIMIT_END == eEnd) {
-        ptEnd->tLimit.iMaxLen = iLoop;
-        ptEnd->tLimit.psVar = psVarName;
-    } else {
-        ptEnd->tNode.iLoop = iLoop;
-        ptEnd->tNode.psVar = psVarName;
-    }
+    NodeLimitInit(ptStart, iLoop, psVarName);
+    NodeLimitInit(ptEnd, iLoop, psVarName);
     listAdd(hList, ptEnd);
 
     return pCur + iLen;
@@ -788,30 +779,73 @@ static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
         ptValue->tBitMap.psVar = psVarName;
         listAdd(hList, ptValue);
     } else {
-        T_Value *ptStart = valueNew(eStart, NULL, 0);
-        if (TYPE_LIMIT_START == eStart) {
-            ptStart->tLimit.iMaxLen = iLoop;
-            ptStart->tLimit.psVar = psVarName;
-        } else {
-            ptStart->tNode.iLoop = iLoop;
-            ptStart->tNode.psVar = psVarName;
-        }
-        listAdd(hList, ptStart);
-
+        listAdd(hList, NodeLimitInit(valueNew(eStart, NULL, 0), iLoop, psVarName));
         listAdd(hList, ptValue);
-
-        T_Value *ptEnd = valueNew(eEnd, NULL, 0);
-        if (TYPE_LIMIT_END == eEnd) {
-            ptEnd->tLimit.iMaxLen = iLoop;
-            ptEnd->tLimit.psVar = psVarName;
-        } else {
-            ptEnd->tNode.iLoop = iLoop;
-            ptEnd->tNode.psVar = psVarName;
-        }
-        listAdd(hList, ptEnd);
+        listAdd(hList, NodeLimitInit(valueNew(eEnd, NULL, 0), iLoop, psVarName));
     }
 
     return pCur + iLen;
+}
+
+static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, H_LIST hHeap, char *pCur)
+{
+    int iLen = 0;
+    E_TYPE eStart;
+    E_TYPE eEnd;
+
+    int iLoop = getLoop(pCur, &iLen, &eStart, &eEnd);
+    if (1 == iLoop) {
+        listAdd(hList, ptValue);
+        setNodeStartFLag(hHeap);
+        return pCur + iLen;
+    }
+
+    char *psVarName = NULL;
+    if (_LOOP_VAR == iLoop) {
+        psVarName = getVarName(pCur, iLen, hList);
+    }
+
+    T_Value *ptStart = valueNew(eStart, NULL, 0);
+    listAdd(hList, NodeLimitInit(ptStart, iLoop, psVarName));
+
+    listAdd(hList, ptValue);
+
+    T_Value *ptEnd = valueNew(eEnd, NULL, 0);
+    listAdd(hList, NodeLimitInit(ptEnd, iLoop, psVarName));
+
+    if (TYPE_NODE_START == eStart) {
+        ptStart->tNode.iNode = _BOOL_YES;
+    } else {
+        setNodeStartFLag(hHeap);
+    }
+
+    return pCur + iLen;
+}
+
+static int setNodeStartFLag(H_LIST hHeap)
+{
+    T_Value *ptNode = NULL;
+    LIST_LOOP(hHeap, if (TYPE_NODE_START == ((T_Value *)ptIter)->eType) {ptNode = ptIter; break;});
+    if (NULL != ptNode) {
+        ptNode->tNode.iNode = _BOOL_YES;
+    }
+
+    return 0;
+}
+
+static T_Value * NodeLimitInit(T_Value *ptValue, int iNum, char *psVar)
+{
+    if (TYPE_LIMIT_START == ptValue->eType || TYPE_LIMIT_END == ptValue->eType) {
+        ptValue->tLimit.iMaxLen = iNum;
+        ptValue->tLimit.psVar = psVar;
+    }
+
+    if (TYPE_NODE_START == ptValue->eType || TYPE_NODE_END == ptValue->eType) {
+        ptValue->tNode.iLoop = iNum;
+        ptValue->tNode.psVar = psVar;
+    }
+
+    return ptValue;
 }
 
 static char * getVarName(char *psBuf, int iLen, H_LIST hList)
@@ -1020,6 +1054,14 @@ static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption)
 
 static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
+    if (ptValue->tNode.iNode && NULL != ptOption->psName && '\0' != ptOption->psName[0]) {
+        _("iRet = setNode(\"%s\");", ptOption->psName);
+        _("if ( iRet != 0 ) {");
+        _("    return -4;");
+        _("}");
+        _("");
+    }
+
     if (_LOOP_VAR == ptValue->tNode.iLoop) {
         if (!ptOption->iLoopInit) {
             ptOption->iLoopInit = 1;
@@ -1142,14 +1184,6 @@ static void valueValueEndParse(T_Value *ptValue, T_Field_Option *ptOption)
 
 static void valueNodeQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (NULL != ptOption->psName) {
-        _("iRet = setNode(\"%s\");", ptOption->psName);
-        _("if ( iRet != 0 ) {");
-        _("    return -4;");
-        _("}");
-        _("");
-    }
-
     _("iRet = %sParse(psBuf, iPos, iMax);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
@@ -1403,6 +1437,18 @@ static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption)
 
 static void valueNodeStartGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
+    if (ptValue->tNode.iNode && NULL != ptOption->psName && '\0' != ptOption->psName[0]) {
+        _("iRet = getNode(\"%s\");", ptOption->psName);
+        _("if ( iRet != 0 ) {");
+        if (ptOption->iLoop) {
+            _("    break;");
+        } else {
+            _("    return -3;");
+        }
+        _("}");
+        _("");
+    }
+
     if (_LOOP_VAR == ptValue->tNode.iLoop) {
         if (0 == ptOption->iINum) {
             ptOption->iINum += 1;
@@ -1538,18 +1584,6 @@ static void valueQuoteEndGen(T_Value *ptValue, T_Field_Option *ptOption)
 
 static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (NULL != ptOption->psName) {
-        _("iRet = getNode(\"%s\");", ptOption->psName);
-        _("if ( iRet != 0 ) {");
-        if (ptOption->iLoop) {
-            _("    break;");
-        } else {
-            _("    return -3;");
-        }
-        _("}");
-        _("");
-    }
-
     _("iRet = %sGen(psBuf, iPos, iMax);", ptValue->psValue);
     _("if ( iRet < 0 ) {");
     _("    return -3;");
