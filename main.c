@@ -458,7 +458,6 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
         }
 
         T_Field *ptNext = ptIter;
-        printf("%s\n", ptNext->psValue);
         if (NULL == ptNow) {
             ptNow = ptNext;
             continue;
@@ -589,6 +588,11 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
         char *pStart = pCur;
         while (1) {
             char caTemp = *pCur;
+            if ('\\' == caTemp) {
+                pCur += 2;
+                continue;
+            }
+
             if ('.' == caTemp || '[' == caTemp || '(' == caTemp || ')' == caTemp || '\0' == caTemp || '$' == caTemp) {
                 break;
             }
@@ -1006,6 +1010,20 @@ static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen)
         ptValue->psValue = malloc(iLen+1);
         memcpy(ptValue->psValue, psValue, iLen);
         ptValue->psValue[iLen] = '\0';
+
+        if (TYPE_STRING == eType) {
+            int i=0,j=0;
+            for (; '\0' != ptValue->psValue[i]; i++,j++) {
+                if ('\\' == ptValue->psValue[i] && '\0' != ptValue->psValue[i+1]) {
+                    i++;
+                }
+
+                if (i != j) {
+                    ptValue->psValue[j] = ptValue->psValue[i];
+                }
+            }
+            ptValue->psValue[j] = '\0';
+        }
     }
 
     return ptValue;
