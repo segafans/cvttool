@@ -58,6 +58,7 @@ typedef struct {
             int iFlag;
             int iNum;
             char *psVar;
+            char *psOrg;
         } tBitMap;
         struct {
             int iLoop;
@@ -95,6 +96,13 @@ typedef struct {
 } T_Field_Option;
 
 typedef void (*FNC_PROC)(T_Value *ptValue, T_Field_Option *ptOption);
+
+#define ERR_BASE               -1000
+#define ERR_BUFFER_TOO_SMALL   -1
+#define ERR_STRING_NOT_SAMLE   -2
+#define ERR_BITMAP_NOT_SAMLE   -3
+#define ERR_GET_VALUE          -4
+#define ERR_SET_VALUE          -5
 
 /*---------------------- Local function declaration ---------------------*/
 static int genFile(H_LIST hMsgList);
@@ -158,6 +166,8 @@ static int setOutPutFileByInPutFile(char *psFile);
 static int setOutPutFile(char *psFile);
 static T_Value * NodeLimitInit(T_Value *ptValue, int iNum, char *psVar);
 static int setNodeStartFLag(H_LIST hHeap);
+
+static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
@@ -379,7 +389,7 @@ static int fieldGenCodeParseOne(T_Field *ptField)
     if (NULL != psVar) {
         _("iRet = setValue(\"%s\", &%s);", ptField->psName, psVar);
         _("if ( iRet != 0 ) {");
-        _("    return -1;");
+        errorPrintf(ERR_SET_VALUE, NULL, &tOption);
         _("}");
     }
     f_Level -= 1;
@@ -559,7 +569,7 @@ static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck)
     if (NULL != psVar) {
         _("iRet = setValue(\"%s\", &%s);", ptField->psName, psVar);
         _("if ( iRet != 0 ) {");
-        _("    return -1;");
+        errorPrintf(ERR_SET_VALUE, NULL, &tOption);
         _("}");
     }
     _("");
@@ -630,6 +640,9 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
             int iFlag = 0;
             T_Value * ptLast = valueNew(TYPE_BITMAP, getBitMap(pCur+1, &iFlag, &iLen), _DLEN_BITMAP);
             ptLast->tBitMap.iFlag = iFlag;
+            ptLast->tBitMap.psOrg = malloc(iLen + 2 + 1);
+            memset(ptLast->tBitMap.psOrg, '\0', iLen + 2);
+            memcpy(ptLast->tBitMap.psOrg, pCur, iLen + 2);
             pCur = setLoop(ptLast, hList, pCur + iLen + 2);
             continue;
         }
@@ -1042,14 +1055,13 @@ static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("iPos += %d;", ptOption->iPreCheck);
         iLen -= ptOption->iPreCheck;
         psStr += ptOption->iPreCheck;
-        ptOption->iPreCheck = 0;
     }
 
     _("if ( iPos + %d > iMax ) {", iLen);
     if (ptOption->iLoop) {
         _("    break;");
     } else {
-        _("    return -1;");
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
     }
     _("}");
 
@@ -1062,12 +1074,14 @@ static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption)
     if (ptOption->iLoop) {
         _("    break;");
     } else {
-        _("    return -1;");
+        errorPrintf(ERR_STRING_NOT_SAMLE, ptValue, ptOption);
     }
     _("}");
     _("iPos += %ld;", iLen);
 
     _("");
+
+    ptOption->iPreCheck = 0;
 }
 
 static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption)
@@ -1231,7 +1245,7 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
         if (ptOption->iLoop) {
             _("    break;");
         } else {
-            _("    return -1;");
+            errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
         }
         _("}");
         if (_LOOP_VAR == ptValue->tBitMap.iNum) {
@@ -1246,39 +1260,13 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
 
     unsigned char caFrist;
     unsigned char caLast;
-    _s();__("/* [bitmap]");
-
-    unsigned int i = 0;
-    for (i=1; i<=128; i++) {
-        if (BITMAP_TEST(ptValue->psValue, i)) {
-            storeChar(i, NULL, NULL);
-        } else {
-            storeChar(0, &caFrist, &caLast);
-            if ('\0' != caFrist) {
-                if ('\0' == caLast) {
-                    __("0x%03d", caFrist);
-                } else {
-                    __("0x%03d-0x%03d", caFrist, caLast);
-                }
-            }
-        }
-    }
-    storeChar(0, &caFrist, &caLast);
-    if ('\0' != caFrist) {
-        if ('\0' == caLast) {
-            __("0x%03d", caFrist);
-        } else {
-            __("0x%03d-0x%03d", caFrist, caLast);
-        }
-    }
-
-    __(" */\n");
+    _("/* [bitmap] %s */", ptValue->tBitMap.psOrg);
 
     _("if ( iPos + 1 > iMax ) {");
     if (ptOption->iLoop) {
         _("    break;");
     } else {
-        _("    return -1;");
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
     }
     _("}");
     _("");
@@ -1289,6 +1277,7 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
     }
 
     int iFlag = 0;
+    unsigned int i = 0;
     for (i=1; i<=128; i++) {
         if (BITMAP_TEST(ptValue->psValue, i)) {
             storeChar(i, NULL, NULL);
@@ -1309,7 +1298,7 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
     if (ptOption->iLoop) {
         _("    break;");
     } else {
-        _("    return -1;");
+        errorPrintf(ERR_BITMAP_NOT_SAMLE, ptValue, ptOption);
     }
     _("}");
     _("iPos += 1;");
@@ -1421,7 +1410,7 @@ static void valueStringGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("/* [string] \"%s\" */", ptValue->psValue);
 
     _("if (iPos + %d > iMax) {", strlen(ptValue->psValue));
-    _("    return -1;");
+    errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
     _("}");
     if (1 == strlen(ptValue->psValue)) {
         _("psBuf[iPos] = '%s';", ptValue->psValue);
@@ -1578,7 +1567,7 @@ static void valueValueEndGen(T_Value *ptValue, T_Field_Option *ptOption)
     ptOption->iLoop -= 1;
     _("iRet = getValue(\"%s\", psBuf + iPos, iMax);", ptOption->psName);
     _("if ( iRet < 0 ) {");
-    _("    return -1;");
+    errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
     _("}");
     _("iPos += iRet;");
     _("");
@@ -1662,6 +1651,44 @@ static int setOutPutFile(char *psFile)
         printf("file[%s] open err[%d:%s]\n", psFile, errno, strerror(errno));
         return -1;
     }
+
+    return 0;
+}
+
+static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
+{
+    _s();
+
+    if (NULL != ptOption->psName && '\0' != ptOption->psName[0]) {
+        __("    printf(\"Filed[%s] ", ptOption->psName);
+    } else {
+        __("    printf(\"");
+    }
+
+    switch (iType) {
+        case ERR_BUFFER_TOO_SMALL:
+            __("ERROR: buffer[%%d] too small\", iMax);");
+            break;
+
+        case ERR_STRING_NOT_SAMLE:
+            __("ERROR at[%%d]: [%%.*s] need [%s]\", iPos, %d, psBuf+iPos);", ptValue->psValue+ptOption->iPreCheck, strlen(ptValue->psValue)-ptOption->iPreCheck);
+            break;
+
+        case ERR_BITMAP_NOT_SAMLE:
+            __("ERROR at[%%d]: [%%c] need [%s]\", iPos, psBuf[iPos]);", ptOption->psName, ptValue->tBitMap.psOrg);
+            break;
+
+        case ERR_GET_VALUE:
+            __("ERROR: get value err[%%d]\", iRet);");
+            break;
+
+        case ERR_SET_VALUE:
+            __("ERROR: set value err[%%d]\", iRet);");
+            break;
+    }
+
+    __("\n");
+    _("    return %d;", ERR_BASE + iType);
 
     return 0;
 }
