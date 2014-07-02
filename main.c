@@ -23,8 +23,7 @@
 #define _DLEN_BITMAP     16
 #define _NUM_BITMAP      _DLEN_BITMAP*8
 
-#define _LOOP_UNLIMITED  (-1)
-#define _LOOP_VAR        (-2)
+#define _LOOP_UNLIMITED  "-1"
 
 #define _BOOL_YES         1
 
@@ -36,38 +35,46 @@
 
 /*---------------------------- Type define ------------------------------*/
 typedef enum {
+    TYPE_NULL,
     TYPE_STRING,
     TYPE_BITMAP,
-    TYPE_NODE_START,
-    TYPE_NODE_END,
-    TYPE_VALUE_START,
-    TYPE_VALUE_END,
-    TYPE_LIMIT_START,
-    TYPE_LIMIT_END,
-    TYPE_QUOTE_START,
-    TYPE_QUOTE_END,
-    TYPE_NODE_QUOTE,
+    TYPE_NODE,
+    TYPE_VAR,
+    TYPE_LIMIT,
+    TYPE_QUOTE,
+    TYPE_ANY,
     TYPE_NUM
 } E_TYPE;
 
 typedef struct {
-    char *psValue;
     E_TYPE eType;
     union {
         struct {
-            int iFlag;
-            char *psLen;
+            char *psBitMap;
+            int iNotFlag;
             char *psOrg;
         } tBitMap;
         struct {
             char *psMax;
             char *psMin;
-            int iIndex;
             int iNode;
+            H_LIST hList;
         } tNode;
         struct {
-            char *psMax;
+            char *psLimit;
+            H_LIST hList;
         } tLimit;
+        struct {
+            char *psVar;
+            H_LIST hList;
+        } tVar;
+        struct {
+            char *psString;
+            int iLen;
+        } tString;
+        struct {
+            char *psQutoe;
+        } tQuote;
     };
 } T_Value;
 
@@ -80,12 +87,13 @@ typedef struct {
 typedef struct {
     char *psName;
     H_LIST hList;
-    int iType;
+    int iOrderFlag;
 } T_Msg;
 
 typedef struct {
     int iLoop;
     int iLoopInit;
+    int iLoopIndex;
     int iMaxTempInit;
     int iLenInit;
     int iPosTempInit;
@@ -102,23 +110,20 @@ typedef void (*FNC_PROC)(T_Value *ptValue, T_Field_Option *ptOption);
 #define ERR_GET_VALUE          -4
 #define ERR_SET_VALUE          -5
 #define ERR_LOOP_MIN           -6
+#define ERR_QUORE_PARSE        -7
+#define ERR_QUORE_GEN          -8
 
 /*---------------------- Local function declaration ---------------------*/
 static int genFile(H_LIST hMsgList);
 static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList);
-static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen);
-
 static int storeChar(unsigned char caChar, unsigned char *psFrist, unsigned char *psLast);
-static char * getBitMap(char *psBuf, int *piFlag, int *piLen);
 static char * setLoop(T_Value *ptValue, H_LIST ptList, char *pCur);
-static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, H_LIST hHeap, char *pCur);
-static int getLoop(char *psBuf, char *psMax, char *psMin, int *piLen, E_TYPE *eStart, E_TYPE *eEnd);
+static char * setLoopNode(T_Value *ptNode, char *psBuf);
+static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, char *pCur);
 static int printfChar(unsigned char caFrist, unsigned char caLast, int *piFlag);
 static int _s();
 static int _(char *psBuf, ...);
 static int __(char *psBuf, ...);
-static char * setLoopNode(T_Value *ptStartNode, T_Value *ptEndNode, H_LIST hList, char *pCur);
-static int setQuote(T_Value *ptValue, char *psVarName);
 static int FiledSort(void *ptFrist, void *ptSecond);
 static T_Msg * msgFind(T_Msg *ptMsg, char *psName, T_Msg *ptRet);
 static int msgFieldAdd(H_LIST ptList, char *psNodeName, char *psVarName, char *psValue);
@@ -126,34 +131,40 @@ static int msgGenCodeFuncDef(T_Msg *ptMsg);
 static int msgGenCode(H_LIST hMsgList);
 static T_Msg * msgGet(H_LIST hMsgList, char *psNodeName);
 
+static T_Value * valueNew(E_TYPE eType);
+static T_Value * valueNewVarIndex(int iIndex);
+static T_Value * valueNewVar(char *psValue, int iLen);
+static T_Value * valueNewString(char *psString, int iLen);
+static T_Value * valueNewBitMap(char *psStart, char *psEnd);
+static T_Value * valueNewQuote(H_LIST hMsgList, char *psStart, char *psEnd);
+static T_Value * valueNewNodeDefault(T_Value *ptValue);
+
+static void valueNullParase(T_Value *ptVcalue, T_Field_Option *ptOption);
 static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption);
 static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeEndParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueValueStartParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueValueEndParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueLimitStartParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueLimitEndParse(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeQuoteParse(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueVarParse(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueLimitParse(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueQuoteParse(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueAnyParse(T_Value *ptValue, T_Field_Option *ptOption);
 
+static void valueNullGen(T_Value *ptVcalue, T_Field_Option *ptOption);
 static void valueStringGen(T_Value *ptValue, T_Field_Option *ptOption);
 static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeStartGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeEndGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueValueStartGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueValueEndGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueLimitStartGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueLimitEndGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueQuoteStartGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueQuoteEndGen(T_Value *ptValue, T_Field_Option *ptOption);
-static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueLimitGen(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueQuoteGen(T_Value *ptValue, T_Field_Option *ptOption);
+static void valueAnyGen(T_Value *ptValue, T_Field_Option *ptOption);
 
 static int fieldGenCodeParse(T_Msg *ptMsg);
 static int fieldGenCodeGen(T_Msg *ptMsg);
 static char * locPrintVar(T_Value *ptValue, char *psVar);
 static T_Field * filedParse(char *psName, char *psValue, H_LIST hMsgList);
 static int fieldGenCodeParseOne(T_Field *ptField);
+static int filedGenCodeParseOnePart(H_LIST hList, T_Field_Option *ptOption);
 static int fieldGenCodeGenOne(T_Field *ptField);
+static int fieldGenCodeGenOnePart(H_LIST hList, T_Field_Option *ptOption);
 static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList);
 static int getSameNum(T_Field *ptFrist, T_Field *ptSecond);
 static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField);
@@ -162,41 +173,31 @@ static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck);
 static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[]);
 static int setOutPutFileByInPutFile(char *psFile);
 static int setOutPutFile(char *psFile);
-static T_Value * NodeLimitInit(T_Value *ptValue, char *psMax, char *psMin);
-static int setNodeStartFLag(H_LIST hHeap);
-static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue);
-static char * initInt(int iNum);
-static int setListQuote(H_LIST hList, char *psName);
-
+static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue, int iIndex);
 static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption);
+static char * memdup(char *psBuf, int iLen);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
+    valueNullParase,
     valueStringParse,
     valueBitMapParse,
-    valueNodeStartParse,
-    valueNodeEndParse,
-    valueValueStartParse,
-    valueValueEndParse,
-    valueLimitStartParse,
-    valueLimitEndParse,
-    valueValueStartParse,
-    valueValueEndParse,
-    valueNodeQuoteParse
+    valueNodeParse,
+    valueVarParse,
+    valueLimitParse,
+    valueQuoteParse,
+    valueAnyParse
 };
 
 FNC_PROC f_fncGenDebug[TYPE_NUM] = {
+    valueNullGen,
     valueStringGen,
     valueBitMapGen,
-    valueNodeStartGen,
-    valueNodeEndGen,
-    valueValueStartGen,
-    valueValueEndGen,
-    valueLimitStartGen,
-    valueLimitEndGen,
-    valueQuoteStartGen,
-    valueQuoteEndGen,
-    valueNodeQuoteGen
+    valueNodeGen,
+    valueVarGen,
+    valueLimitGen,
+    valueQuoteGen,
+    valueAnyGen
 };
 
 static int f_Level = 0;
@@ -315,7 +316,7 @@ static T_Msg * msgGet(H_LIST hMsgList, char *psNodeName)
         ptMsg = malloc(sizeof(T_Msg));
         ptMsg->psName = strdup(psNodeName);
         ptMsg->hList = listNew();
-        ptMsg->iType = 0;
+        ptMsg->iOrderFlag = 0;
         listAdd(hMsgList, ptMsg);
     }
 
@@ -351,7 +352,7 @@ static int fieldGenCodeParse(T_Msg *ptMsg)
         return 0;
     }
 
-    if (ptMsg->iType) {
+    if (ptMsg->iOrderFlag) {
         return fieldGenCodeParseUnSort(ptMsg->psName, ptMsg->hList);
     }
 
@@ -384,7 +385,7 @@ static int fieldGenCodeParseOne(T_Field *ptField)
     _(" */");
     _("{");
     f_Level += 1;
-    LIST_LOOP(ptField->hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter, &tOption));
+    filedGenCodeParseOnePart(ptField->hList, &tOption);
 
     char *psVar = NULL;
     LIST_LOOP(ptField->hList, psVar = locPrintVar(ptIter, psVar));
@@ -398,6 +399,12 @@ static int fieldGenCodeParseOne(T_Field *ptField)
     _("}");
     _("");
 
+    return 0;
+}
+
+static int filedGenCodeParseOnePart(H_LIST hList, T_Field_Option *ptOption)
+{
+    LIST_LOOP(hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter, ptOption));
     return 0;
 }
 
@@ -436,11 +443,17 @@ static int fieldGenCodeGenOne(T_Field *ptField)
     _(" */");
     _("{");
     f_Level += 1;
-    LIST_LOOP(ptField->hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter, &tOption));
+    fieldGenCodeGenOnePart(ptField->hList, &tOption);
     f_Level -= 1;
     _("}");
     _("");
 
+    return 0;
+}
+
+static int fieldGenCodeGenOnePart(H_LIST hList, T_Field_Option *ptOption)
+{
+    LIST_LOOP(hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter, ptOption));
     return 0;
 }
 
@@ -503,7 +516,7 @@ static int getSameNum(T_Field *ptFrist, T_Field *ptSecond)
 
     int i = 0;
     while (1) {
-        if (ptFristValue->psValue[i] != ptSecodeValue->psValue[i]) {
+        if (ptFristValue->tVar.psVar[i] != ptSecodeValue->tVar.psVar[i]) {
             break;
         }
         i++;
@@ -518,7 +531,7 @@ static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField)
 
     if (iLast != 0) {
         f_Level -= 1;
-        _("} else if ('%c' == psBuf[iPos+%d]) {", pValue->psValue[iLast-1], iLast-1);
+        _("} else if ('%c' == psBuf[iPos+%d]) {", pValue->tVar.psVar[iLast-1], iLast-1);
         f_Level += 1;
         if (iLast >= iNow) {
             fieldCodeGenOneUnSort(ptField, iNow);
@@ -534,7 +547,7 @@ static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField)
                 _("}");
             }
 
-            _("if ('%c' == psBuf[iPos+%d]) {", pValue->psValue[iLast+i], iLast+i);
+            _("if ('%c' == psBuf[iPos+%d]) {", pValue->tVar.psVar[iLast+i], iLast+i);
             i += 1;
             f_Level += 1;
         } else if ( iLast + i > iNow ) {
@@ -584,13 +597,12 @@ static int FiledSort(void *ptFrist, void *ptSecond)
     T_Value *ptFristValue = listFrist(((T_Field *)ptFrist)->hList);
     T_Value *ptSecodeValue = listFrist(((T_Field *)ptSecond)->hList);
 
-    return strcmp(ptFristValue->psValue, ptSecodeValue->psValue);
+    return strcmp(ptFristValue->tVar.psVar, ptSecodeValue->tVar.psVar);
 }
 
 static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
 {
     H_LIST hHeap = listNew();
-    T_Value *ptLastValue = NULL;
     char *pCur = psBuf;
     int iIndex = 1;
     f_NodeIndex = 1;
@@ -620,132 +632,98 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
         if (pStart != pCur) {
             if ('*' == *pCur || '{' == *pCur || '<' == *pCur) {
                 if (pCur -1 > pStart) {
-                    listAdd(hList, valueNew(TYPE_STRING, pStart, (int)(pCur-pStart-1)));
+                    listAdd(hList, valueNewString(pStart, (int)(pCur-pStart-1)));
                 }
-                pCur = setLoop(valueNew(TYPE_STRING, pCur-1, 1), hList, pCur);
+                pCur = setLoop(valueNewString(pCur-1, 1), hList, pCur);
                 continue;
             } else {
-                listAdd(hList, valueNew(TYPE_STRING, pStart, (int)(pCur-pStart)));
+                listAdd(hList, valueNewString(pStart, (int)(pCur-pStart)));
             }
         }
 
         /* . */
         if ('.' == *pCur) {
-            T_Value * ptLast = valueNew(TYPE_BITMAP, NULL, 0);
-            ptLast->tBitMap.psLen = initInt(1);
+            T_Value * ptLast = valueNew(TYPE_ANY);
             pCur = setLoop(ptLast, hList, pCur+1);
             continue;
         }
 
         /* [....] */
         if ('[' == *pCur) {
-            int iLen = 0;
-            int iFlag = 0;
-            T_Value * ptLast = valueNew(TYPE_BITMAP, getBitMap(pCur+1, &iFlag, &iLen), _DLEN_BITMAP);
-            ptLast->tBitMap.iFlag = iFlag;
-            ptLast->tBitMap.psOrg = malloc(iLen + 2 + 1);
-            memset(ptLast->tBitMap.psOrg, '\0', iLen + 2);
-            memcpy(ptLast->tBitMap.psOrg, pCur, iLen + 2);
-            pCur = setLoop(ptLast, hList, pCur + iLen + 2);
+            char *psStart = pCur + 1;
+            char *psEnd = strchr(pCur, ']');
+            T_Value *ptBitMap = valueNewBitMap(psStart, psEnd);
+            pCur = setLoop(ptBitMap, hList, psEnd+1);
             continue;
         }
 
         /* ( | (?: */
         if ('(' == *pCur) {
-            T_Value * ptNode = valueNew(TYPE_NODE_START, NULL, 0);
-            ptNode->tNode.psMax = initInt(1);
-            ptNode->tNode.iIndex = f_NodeIndex++;
-            listAdd(hList, ptNode);
-            listPush(hHeap, ptNode);
+            listPush(hHeap, hList);
+            hList = listNew();
 
             if ('?' != pCur[1] || ':' != pCur[2]) {
-                if (ptLastValue != NULL) {
-                    listFree(hHeap);
-                    return -1;
-                }
-
-                char *psName = malloc(20);
-                int iLen = 0;
-                iLen = sprintf(psName, "Var%d", iIndex);
-                ptLastValue = valueNew(TYPE_VALUE_START, psName, iLen);
-                listAdd(hList, ptLastValue);
+                /* ( */
+                T_Value *ptVar = valueNewVarIndex(iIndex);
+                listPush(hHeap, ptVar);
 
                 iIndex += 1;
                 pCur += 1;
             } else if ( '<' == pCur[3] ) {
-                int iLen = 0;
-                while (1) {
-                    if ('>' == pCur[iLen+4] || '\0' == pCur[iLen+4]) {
-                        break;
-                    }
-                    iLen += 1;
-                }
+                /* (?:<...> */
+                char *psStart = pCur + 4;
+                char *psEnd = strchr(psStart, '>');
+                T_Value *ptVar = valueNewVar(psStart, psEnd-psStart);
+                listPush(hHeap, ptVar);
 
-                if ('\0' == pCur || 0 == iLen) {
-                    listFree(hHeap);
-                    return -3;
-                }
-
-                ptLastValue = valueNew(TYPE_VALUE_START, pCur+4, iLen);
-                listAdd(hList, ptLastValue);
-                pCur += 3 + 2 + iLen;
+                pCur +=  3 + (psEnd - psStart) + 1;
             } else {
+                /* (?: */
+                T_Value *ptNode = valueNew(TYPE_NULL);
+                listPush(hHeap, ptNode);
+
                 pCur += 3;
             }
+
             continue;
         }
 
         /*  ) */
         if (')' == *pCur) {
-            if (NULL != ptLastValue) {
-                T_Value *ptLast = valueNew(TYPE_VALUE_END, ptLastValue->psValue, -1);
-                listAdd(hList, ptLast);
-                ptLastValue = NULL;
+            T_Value *ptValue = listPop(hHeap);
+
+            if (TYPE_VAR == ptValue->eType) {
+                ptValue->tVar.hList = hList;
+                pCur += 1;
+            } else {
+                pCur = setLoopNode(ptValue, pCur+1);
+                if (TYPE_NULL == ptValue->eType) {
+                    valueNewNodeDefault(ptValue);
+                    ptValue->tNode.hList = hList;
+                } else if ( TYPE_NODE == ptValue->eType ) {
+                    ptValue->tNode.hList = hList;
+                } else if ( TYPE_LIMIT == ptValue->eType ) {
+                    ptValue->tLimit.hList = hList;
+                }
             }
 
-            T_Value *ptNodeEnd = valueNew(TYPE_NODE_END, NULL, 0);
-            T_Value *ptNodeStart = listPop(hHeap);
-            if (NULL == ptNodeStart) {
-                listFree(hHeap);
-                return -4;
-            }
+            hList = listPop(hHeap);
+            listAdd(hList, ptValue);
 
-            pCur = setLoopNode(ptNodeStart, ptNodeEnd, hList, pCur+1);
             continue;
         }
 
         /* $ */
         if ('$' == *pCur) {
-            int iFlag = 0;
-            int iLen = 1;
-            if ( '{' != pCur[iLen] ) {
+            char *psStart = pCur + 1;
+            if ( '{' != psStart[0] ) {
                 listFree(hHeap);
                 return -4;
             }
-            iLen += 1;
 
-            if ('?' == pCur[iLen]) {
-                iFlag = 1;
-                iLen += 1;
-            }
-
-            while (1) {
-                if ('}' == pCur[iLen] || '\0' == pCur[iLen]) {
-                    iLen += 1;
-                    break;
-                }
-                iLen += 1;
-            }
-
-            if ('\0' == pCur || iLen <= 3) {
-                listFree(hHeap);
-                return -3;
-            }
-
-            T_Value *ptNodeQuote = valueNew(TYPE_NODE_QUOTE, pCur+2+iFlag, iLen-3-iFlag);
-            T_Msg *ptMsg = msgGet(hMsgList, ptNodeQuote->psValue);
-            ptMsg->iType = iFlag;
-            pCur = setLoopNodeQuote(ptNodeQuote, hList, hHeap, pCur+iLen);
+            char *psEnd = strchr(psStart, '}');
+            T_Value *ptQuote = valueNewQuote(hMsgList, psStart+1, psEnd);
+            pCur = setLoopNodeQuote(ptQuote, hList, psEnd+1);
         }
 
         if ('\0' == *pCur) {
@@ -758,322 +736,291 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
     return 0;
 }
 
-static char * setLoopNode(T_Value *ptStart, T_Value *ptEnd, H_LIST hList, char *pCur)
+static T_Value * valueNewVarIndex(int iIndex)
 {
-    int iLen = 0;
+    char sName[_DLEN_TINY_BUF];
+    sprintf(sName, "Var%d", iIndex);
 
-    char sMax[_DLEN_MINI_BUF];
-    char sMin[_DLEN_MINI_BUF];
-
-    memset(sMax, '\0', sizeof(sMax));
-    memset(sMin, '\0', sizeof(sMin));
-
-    getLoop(pCur, sMax, sMin, &iLen, &ptStart->eType, &ptEnd->eType);
-    setListQuote(hList, sMax);
-
-    NodeLimitInit(ptStart, sMax, sMin);
-    NodeLimitInit(ptEnd, sMax, sMin);
-    listAdd(hList, ptEnd);
-
-    return pCur + iLen;
+    return valueNewVar(sName, -1);
 }
 
-static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
+static T_Value * valueNewVar(char *psValue, int iLen)
 {
-    int iLen = 0;
-    E_TYPE eStart;
-    E_TYPE eEnd;
-    char sMax[_DLEN_MINI_BUF];
-    char sMin[_DLEN_MINI_BUF];
-
-    memset(sMax, '\0', sizeof(sMax));
-    memset(sMin, '\0', sizeof(sMin));
-
-    getLoop(pCur, sMax, sMin, &iLen, &eStart, &eEnd);
-    setListQuote(hList, sMax);
-
-    if (0 == strcmp(sMax, "1") && 0 == strcmp(sMin, "1")) {
-        listAdd(hList, ptValue);
-        return pCur + iLen;
+    if (NULL == psValue || 0 == iLen) {
+        return NULL;
     }
 
-    if ( 0 != strcmp(sMax, "-1") && 0 == strcmp(sMax, sMin) && TYPE_BITMAP == ptValue->eType && NULL == ptValue->psValue) {
-        ptValue->tBitMap.psLen = strdup(sMax);
-        listAdd(hList, ptValue);
-    } else {
-        listAdd(hList, NodeLimitInit(valueNew(eStart, NULL, 0), sMax, sMin));
-        listAdd(hList, ptValue);
-        listAdd(hList, NodeLimitInit(valueNew(eEnd, NULL, 0), sMax, sMin));
+    T_Value *ptValue = valueNew(TYPE_VAR);
+
+    if (iLen < 0) {
+        iLen = strlen(psValue);
     }
 
-    return pCur + iLen;
-}
+    ptValue->tVar.psVar = malloc(iLen+1);
+    memcpy(ptValue->tVar.psVar, psValue, iLen);
+    ptValue->tVar.psVar[iLen] = '\0';
 
-static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, H_LIST hHeap, char *pCur)
-{
-    int iLen = 0;
-    E_TYPE eStart;
-    E_TYPE eEnd;
-    char sMax[_DLEN_MINI_BUF];
-    char sMin[_DLEN_MINI_BUF];
-
-    memset(sMax, '\0', sizeof(sMax));
-    memset(sMin, '\0', sizeof(sMin));
-
-    getLoop(pCur, sMax, sMin, &iLen, &eStart, &eEnd);
-    setListQuote(hList, sMax);
-
-    if (0 == strcmp(sMax, "1") && 0 == strcmp(sMin, "1")) {
-        listAdd(hList, ptValue);
-        setNodeStartFLag(hHeap);
-        return pCur + iLen;
-    }
-
-    T_Value *ptStart = valueNew(eStart, NULL, 0);
-    listAdd(hList, NodeLimitInit(ptStart, sMax, sMin));
-
-    listAdd(hList, ptValue);
-
-    T_Value *ptEnd = valueNew(eEnd, NULL, 0);
-    listAdd(hList, NodeLimitInit(ptEnd, sMax, sMin));
-
-    if (TYPE_NODE_START == eStart) {
-        ptStart->tNode.iNode = _BOOL_YES;
-    } else {
-        setNodeStartFLag(hHeap);
-    }
-
-    return pCur + iLen;
-}
-
-static int setNodeStartFLag(H_LIST hHeap)
-{
-    T_Value *ptNode = NULL;
-    LIST_LOOP(hHeap, if (TYPE_NODE_START == ((T_Value *)ptIter)->eType) {ptNode = ptIter; break;});
-    if (NULL != ptNode) {
-        ptNode->tNode.iNode = _BOOL_YES;
-    }
-
-    return 0;
-}
-
-static T_Value * NodeLimitInit(T_Value *ptValue, char *psMax, char *psMin)
-{
-    if (TYPE_LIMIT_START == ptValue->eType || TYPE_LIMIT_END == ptValue->eType) {
-        ptValue->tLimit.psMax = strdup(psMax);
-    }
-
-    if (TYPE_NODE_START == ptValue->eType || TYPE_NODE_END == ptValue->eType) {
-        ptValue->tNode.psMax = strdup(psMax);
-        ptValue->tNode.psMin = strdup(psMin);
-    }
+    ptValue->tVar.hList = listNew();
 
     return ptValue;
 }
 
-static int setListQuote(H_LIST hList, char *psName)
+static T_Value * valueNewString(char *psString, int iLen)
 {
-    if ('$' != psName[0]) {
-        return 0;
+    if (NULL == psString || 0 == iLen) {
+        return NULL;
     }
 
-    int iVar = atoi(psName+1);
-    if (0 == iVar) {
-        return 0;
+    T_Value *ptValue = valueNew(TYPE_STRING);
+
+    if (iLen < 0) {
+        iLen = strlen(psString);
     }
 
-    char sVar[_DLEN_TINY_BUF];
-    sprintf(sVar, "Var%d", iVar);
-    LIST_LOOP(hList, setQuote(ptIter, sVar));
+    ptValue->tString.psString = malloc(iLen+1);
+    memcpy(ptValue->tString.psString, psString, iLen);
+    ptValue->tString.psString[iLen] = '\0';
 
-    return 0;
+    int i=0,j=0;
+    for (; '\0' != ptValue->tString.psString[i]; i++,j++) {
+        if ('\\' == ptValue->tString.psString[i] && '\0' != ptValue->tString.psString[i+1]) {
+            i++;
+        }
+
+        if (i != j) {
+            ptValue->tString.psString[j] = ptValue->tString.psString[i];
+        }
+    }
+    ptValue->tString.psString[j] = '\0';
+
+    ptValue->tString.iLen = j;
+
+
+    return ptValue;
 }
 
-static int setQuote(T_Value *ptValue, char *psVarName)
+static T_Value * valueNewBitMap(char *psStart, char *psEnd)
 {
-    if (TYPE_VALUE_START == ptValue->eType && 0 == strcmp(psVarName, ptValue->psValue)) {
-        ptValue->eType = TYPE_QUOTE_START;
+    T_Value *ptBitMap = valueNew(TYPE_BITMAP);
+
+    char *p = psStart;
+    if ('^' == p[0]) {
+        ptBitMap->tBitMap.iNotFlag = 1;
+        p += 1;
     }
 
-    if (TYPE_VALUE_END == ptValue->eType && 0 == strcmp(psVarName, ptValue->psValue)) {
-        ptValue->eType = TYPE_QUOTE_END;
-    }
-
-    return 0;
-}
-
-static int getLoop(char *psBuf, char *psMax, char *psMin, int *piLen, E_TYPE *eStart, E_TYPE *eEnd)
-{
-    if ('*' == psBuf[0] ) {
-        *eStart = TYPE_NODE_START;
-        *eEnd   = TYPE_NODE_END;
-        *piLen = 1;
-        sprintf(psMax, "%d", _LOOP_UNLIMITED);
-        sprintf(psMin, "%d", 0);
-
-        return 0;
-    }
-
-    if ('+' == psBuf[0]) {
-        *eStart = TYPE_NODE_START;
-        *eEnd   = TYPE_NODE_END;
-        *piLen = 1;
-        sprintf(psMax, "%d", _LOOP_UNLIMITED);
-        sprintf(psMin, "%d", 1);
-
-        return 0;
-    }
-
-    if ('?' == psBuf[0]) {
-        *eStart = TYPE_NODE_START;
-        *eEnd   = TYPE_NODE_END;
-        *piLen = 1;
-        sprintf(psMax, "%d", 1);
-        sprintf(psMin, "%d", 0);
-
-        return 0;
-    }
-
-    if ('{' == psBuf[0]) {
-        int iLen = 1;
-        int i = 0;
-        char *p = psMin;
-        while (psBuf[iLen] != '}') {
-            if (',' == psBuf[iLen]) {
-                i = 0;
-                p = psMax;
-            }
-            p[i] = psBuf[iLen];
-            iLen += 1;
-            i += 1;
-        }
-        *piLen = iLen + 1;
-        *eStart = TYPE_NODE_START;
-        *eEnd   = TYPE_NODE_END;
-
-        if (p != psMax) {
-            strcpy(psMax, psMin);
-        } else if ( '\0' == psMax[0] ) {
-            sprintf(psMax, "-1");
-        }
-        
-        return 0;
-    }
-
-    if ('<' == psBuf[0]) {
-        int iLen = 1;
-        while (psBuf[iLen] != '>') {
-            psMax[iLen-1] = psBuf[iLen];
-            iLen += 1;
-        }
-        *piLen = iLen + 1;
-        *eStart = TYPE_LIMIT_START;
-        *eEnd = TYPE_LIMIT_END;
-
-        return 0;
-    }
-
-    /* No Loop */
-    *piLen = 0;
-    *eStart = TYPE_NODE_START;
-    *eEnd   = TYPE_NODE_END;
-    sprintf(psMax, "%d", 1);
-    sprintf(psMin, "%d", 1);
-
-    return 0;
-}
-
-static char * getBitMap(char *psBuf, int *piFlag, int *piLen)
-{
-    static char sBitMap[_DLEN_BITMAP];
-
-    memset(sBitMap, '\0', sizeof(sBitMap));
-    int iLen = 0;
-    if (NULL != piFlag) {
-        *piFlag = 0;
-    }
-
-    if ('^' == psBuf[0]) {
-        if (NULL != piFlag) {
-            *piFlag = 1;
-        }
-        iLen += 1;
-    }
-
-    for (; psBuf[iLen] != ']' && psBuf[iLen] != '\0'; ++iLen) {
-        if (iLen != 0 && '-' == psBuf[iLen]) {
-            if (psBuf[iLen-1] == psBuf[iLen+1]) {
-                iLen += 1;
+    char *psBitMap = malloc(_DLEN_BITMAP);
+    memset(psBitMap, '\0', _DLEN_BITMAP);
+    for (; p != psEnd; ++p) {
+        if (p != psStart && '-' == p[0]) {
+            if (p[-1] == p[1]) {
+                p += 1;
                 continue;
             }
 
-            unsigned char caStart = psBuf[iLen-1];
-            unsigned char caEnd   = psBuf[iLen+1];
+            unsigned char caStart = p[-1];
+            unsigned char caEnd   = p[1];
 
             if (caStart > caEnd) {
-                caStart = psBuf[iLen+1];
-                caEnd   = psBuf[iLen-1];
+                caStart = p[1];
+                caEnd   = p[-1];
             }
 
             for (; caStart<=caEnd; caStart++) {
-                BITMAP_SET(sBitMap, caStart);
+                BITMAP_SET(psBitMap, caStart);
             }
             continue;
-        } else if ( '\\' == psBuf[iLen] ) {
-            iLen += 1;
+        } else if ( '\\' == p[0] ) {
+            p += 1;
         }
 
-        BITMAP_SET(sBitMap, (unsigned char )psBuf[iLen]);
+        BITMAP_SET(psBitMap, (unsigned char )(p[0]));
     }
-    *piLen = iLen;
 
-    return sBitMap;
+    ptBitMap->tBitMap.psBitMap = psBitMap;
+    ptBitMap->tBitMap.psOrg = memdup(psStart, psEnd-psStart);
+
+    return ptBitMap;
 }
 
-static T_Value * valueNew(E_TYPE eType, char *psValue, int iLen)
+static T_Value * valueNewQuote(H_LIST hMsgList, char *psStart, char *psEnd)
+{
+    T_Value *ptValue = valueNew(TYPE_QUOTE);
+
+    int iOrederFlag = 0;
+    if ('?' == psStart[0]) {
+        iOrederFlag = 1;
+        psStart += 1;
+    }
+
+    ptValue->tQuote.psQutoe = memdup(psStart, psEnd-psStart);
+    T_Msg *ptMsg = msgGet(hMsgList, ptValue->tQuote.psQutoe);
+    ptMsg->iOrderFlag = iOrederFlag;
+
+    return ptValue;
+}
+
+static T_Value * valueNewNodeDefault(T_Value *ptValue)
+{
+    if (NULL == ptValue) {
+        ptValue = valueNew(TYPE_NODE);
+    } else {
+        memset(ptValue, '\0', sizeof(T_Value));
+    }
+
+    ptValue->tNode.hList = listNew();
+    ptValue->tNode.psMax = "1";
+    ptValue->tNode.iNode = 0;
+
+    return ptValue;
+}
+
+static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
+{
+    T_Value tNode;
+    memset(&tNode, '\0', sizeof(tNode));
+
+    pCur = setLoopNode(&tNode, pCur);
+    if (TYPE_NULL == tNode.eType) {
+        listAdd(hList, ptValue);
+        return pCur;
+    }
+
+    T_Value *ptNew = valueNew(tNode.eType);
+    memcpy(ptNew, &tNode, sizeof(tNode));
+
+    if (TYPE_NODE == ptNew->eType) {
+        ptNew->tNode.hList = listNew();
+        listAdd(ptNew->tNode.hList, ptValue);
+        listAdd(hList, ptNew);
+    }
+
+    if (TYPE_LIMIT == ptNew->eType) {
+        ptNew->tLimit.hList = listNew();
+        listAdd(ptNew->tLimit.hList, ptValue);
+        listAdd(hList, ptNew);
+    }
+
+    return pCur;
+}
+
+static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, char *pCur)
+{
+    T_Value tNode;
+    memset(&tNode, '\0', sizeof(tNode));
+
+    pCur = setLoopNode(&tNode, pCur);
+    if (TYPE_NULL == tNode.eType) {
+        T_Value *ptNew = valueNewNodeDefault(NULL);
+        listAdd(ptNew->tNode.hList, ptValue);
+        listAdd(hList, ptNew);
+        return pCur;
+    }
+
+    T_Value *ptNew = valueNew(tNode.eType);
+    memcpy(ptNew, &tNode, sizeof(tNode));
+
+    if (TYPE_NODE == ptNew->eType) {
+        ptNew->tNode.hList = listNew();
+        listAdd(ptNew->tNode.hList, ptValue);
+        listAdd(hList, ptNew);
+    }
+
+    if (TYPE_LIMIT == ptNew->eType) {
+        ptNew->tLimit.hList = listNew();
+        listAdd(ptNew->tLimit.hList, ptValue);
+        listAdd(hList, ptNew);
+    }
+
+    return pCur;
+}
+
+static char * setLoopNode(T_Value *ptNode, char *psBuf)
+{
+    if ('*' == psBuf[0] ) {
+        ptNode->eType = TYPE_NODE;
+        ptNode->tNode.psMax = _LOOP_UNLIMITED;
+        ptNode->tNode.psMin = "0";
+
+        return psBuf + 1;
+    }
+
+    if ('+' == psBuf[0]) {
+        ptNode->eType = TYPE_NODE;
+        ptNode->tNode.psMax = _LOOP_UNLIMITED;
+        ptNode->tNode.psMin = "1";
+
+        return psBuf + 1;
+    }
+
+    if ('?' == psBuf[0]) {
+        ptNode->eType = TYPE_NODE;
+        ptNode->tNode.psMax = "1";
+        ptNode->tNode.psMin = "0";
+
+        return psBuf + 1;
+    }
+
+    if ('{' == psBuf[0]) {
+        ptNode->eType = TYPE_NODE;
+        char *psMin = NULL;
+        char *psEnd = strpbrk(psBuf+1, ",}");
+        if (NULL == psEnd) {
+            return NULL;
+        }
+
+        if (',' == *psEnd) {
+            psMin = psEnd;
+            psEnd = strchr(psBuf, '}');
+        }
+
+        if (NULL == psMin) {
+            ptNode->tNode.psMin = NULL;
+            ptNode->tNode.psMax = memdup(psBuf+1, psEnd-psBuf-1);
+        } else {
+            ptNode->tNode.psMin = memdup(psBuf+1, psMin-psBuf-1);
+            ptNode->tNode.psMax = memdup(psMin+1, psEnd-psMin-1);
+        }
+        
+        return psEnd + 1;
+    }
+
+    if ('<' == psBuf[0]) {
+        ptNode->eType = TYPE_LIMIT;
+        char *psEnd = strchr(psBuf+1, '>');
+        ptNode->tLimit.psLimit = memdup(psBuf+1, psEnd-psBuf-1);
+
+        return psEnd + 1;
+    }
+
+    ptNode->eType = TYPE_NULL;
+    return psBuf;
+}
+
+static T_Value * valueNew(E_TYPE eType)
 {
     T_Value *ptValue = malloc(sizeof(T_Value));
     memset(ptValue, '\0', sizeof(T_Value));
 
     ptValue->eType = eType;
 
-    if (iLen < 0 && psValue != NULL) {
-        iLen = strlen(psValue);
-    }
-
-    ptValue->psValue = NULL;
-    if (NULL != psValue && 0 != iLen) {
-        ptValue->psValue = malloc(iLen+1);
-        memcpy(ptValue->psValue, psValue, iLen);
-        ptValue->psValue[iLen] = '\0';
-
-        if (TYPE_STRING == eType) {
-            int i=0,j=0;
-            for (; '\0' != ptValue->psValue[i]; i++,j++) {
-                if ('\\' == ptValue->psValue[i] && '\0' != ptValue->psValue[i+1]) {
-                    i++;
-                }
-
-                if (i != j) {
-                    ptValue->psValue[j] = ptValue->psValue[i];
-                }
-            }
-            ptValue->psValue[j] = '\0';
-        }
-    }
-
     return ptValue;
+}
+
+static void valueNullParase(T_Value *ptVcalue, T_Field_Option *ptOption)
+{
+    _("should not have null error;");
 }
 
 static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    _("/* [string] \"%s\" */", ptValue->psValue);
-    if (ptOption->iPreCheck == strlen(ptValue->psValue)) {
+    _("/* [string] \"%s\" */", ptValue->tString.psString);
+    if (ptOption->iPreCheck >= ptValue->tString.iLen) {
         return;
     }
 
-    char *psStr = ptValue->psValue;
-    int iLen = strlen(ptValue->psValue);
+    char *psStr = ptValue->tString.psString;
+    int iLen = ptValue->tString.iLen;
     if (ptOption->iPreCheck > 0) {
         _("iPos += %d;", ptOption->iPreCheck);
         iLen -= ptOption->iPreCheck;
@@ -1107,25 +1054,27 @@ static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption)
     ptOption->iPreCheck = 0;
 }
 
-static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
     char sMax[_DLEN_TINY_BUF];
     char sMin[_DLEN_TINY_BUF];
     char sLoop[_DLEN_TINY_BUF];
     char sRestore[_DLEN_TINY_BUF];
-    int iMaxMinIsSame = strcmp(sMin, sMax) == 0 ? _BOOL_YES : !_BOOL_YES;
+    int iIndex = ptOption->iLoopIndex;
+    ptOption->iLoopIndex += 1;
 
-    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue);
+    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
+
+    if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
+        filedGenCodeParseOnePart(ptValue->tNode.hList, ptOption);
+        return;
+    }
 
     if ('$' == ptValue->tNode.psMax[0]) {
-        _("int iLoopMax%d = strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tNode.iIndex, ptValue->tNode.psMax+1, ptValue->tNode.psMax+1);
+        _("int iLoopMax%d = strStr2Int(Var%s.psValue, Var%s.iLen);", iIndex, ptValue->tNode.psMax+1, ptValue->tNode.psMax+1);
     }
 
-    if ('$' == ptValue->tNode.psMin[0]) {
-        _("int iLoopMin%d = strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tNode.iIndex, ptValue->tNode.psMin+1, ptValue->tNode.psMin+1);
-    }
-
-    if (!iMaxMinIsSame) {
+    if (NULL != ptValue->tNode.psMin) {
         _("int %s = iPos;", sRestore);
     }
 
@@ -1135,7 +1084,7 @@ static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption)
     } else {
         _("for (;%s < %s; %s++) {", sLoop, sMax, sLoop);
     }
-    if (!iMaxMinIsSame) {
+    if (NULL != ptValue->tNode.psMin) {
         ptOption->iLoop += 1;
     }
     f_Level += 1;
@@ -1147,19 +1096,10 @@ static void valueNodeStartParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("}");
         _("");
     }
-}
 
-static void valueNodeEndParse(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    char sMax[_DLEN_TINY_BUF];
-    char sMin[_DLEN_TINY_BUF];
-    char sLoop[_DLEN_TINY_BUF];
-    char sRestore[_DLEN_TINY_BUF];
-    int iMaxMinIsSame = strcmp(sMin, sMax) == 0 ? _BOOL_YES : !_BOOL_YES;
+    filedGenCodeParseOnePart(ptValue->tNode.hList, ptOption);
 
-    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue);
-
-    if (!iMaxMinIsSame) {
+    if (NULL != ptValue->tNode.psMin) {
         _("%s = iPos;", sRestore);
     }
 
@@ -1167,7 +1107,7 @@ static void valueNodeEndParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("}");
     _("");
 
-    if (!iMaxMinIsSame) {
+    if (NULL != ptValue->tNode.psMin) {
         ptOption->iLoop -= 1;
         _("if ( %s < %s ) { ", sLoop, sMin);
         errorPrintf(ERR_LOOP_MIN, ptValue, ptOption);
@@ -1176,29 +1116,31 @@ static void valueNodeEndParse(T_Value *ptValue, T_Field_Option *ptOption)
     }
 }
 
-static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue)
+static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue, int iIndex)
 {
     if ('$' == ptValue->tNode.psMax[0]) {
-        sprintf(sMax, "iLoopMax%d", ptValue->tNode.iIndex);
+        sprintf(sMax, "iLoopMax%d", iIndex);
     } else {
         sprintf(sMax, "%d", atoi(ptValue->tNode.psMax));
     }
 
-    if ('$' == ptValue->tNode.psMin[0]) {
-        sprintf(sMin, "iLoopMin%d", ptValue->tNode.iIndex);
-    } else {
-        sprintf(sMin, "%d", atoi(ptValue->tNode.psMax));
+    if (NULL != ptValue->tNode.psMin) {
+        if ('$' == ptValue->tNode.psMin[0]) {
+            sprintf(sMin, "iLoopMin%d", iIndex);
+        } else {
+            sprintf(sMin, "%d", atoi(ptValue->tNode.psMin));
+        }
     }
 
-    sprintf(sLoop, "iLoop%d", ptValue->tNode.iIndex);
-    sprintf(psRestore, "iRestore%d", ptValue->tNode.iIndex);
+    sprintf(sLoop, "iLoop%d", iIndex);
+    sprintf(psRestore, "iRestore%d", iIndex);
 
     return 0;
 }
 
-static void valueLimitStartParse(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueLimitParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if ('$' != ptValue->tLimit.psMax[0] && atoi(ptValue->tLimit.psMax) <= 0) {
+    if ('$' != ptValue->tLimit.psLimit[0] && atoi(ptValue->tLimit.psLimit) <= 0) {
         return;
     }
 
@@ -1209,20 +1151,15 @@ static void valueLimitStartParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("iMaxTemp = iMax;");
     }
 
-    if ('$' == ptValue->tLimit.psMax[0]) {
-        _("iMax = iPos + strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tLimit.psMax+1, ptValue->tLimit.psMax+1);
+    if ('$' == ptValue->tLimit.psLimit[0]) {
+        _("iMax = iPos + strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tLimit.psLimit+1, ptValue->tLimit.psLimit+1);
     } else {
-        _("iMax = iPos + %s;", ptValue->tLimit.psMax);
+        _("iMax = iPos + %s;", ptValue->tLimit.psLimit);
     }
 
     _("");
-}
 
-static void valueLimitEndParse(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    if ('$' != ptValue->tLimit.psMax[0] && atoi(ptValue->tLimit.psMax) <= 0) {
-        return;
-    }
+    filedGenCodeParseOnePart(ptValue->tLimit.hList, ptOption);
 
     _("if ( iPos != iMax ) {");
     _("    return -2;");
@@ -1231,62 +1168,45 @@ static void valueLimitEndParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("");
 }
 
-static void valueValueStartParse(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueVarParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    _("/* [value start] %s */", ptValue->psValue);
-    _("T_VALUE %s;", ptValue->psValue);
-    _("%s.psValue = psBuf+iPos;", ptValue->psValue);
-    _("%s.iLen = 0;", ptValue->psValue);
+    _("/* [value start] %s */", ptValue->tVar.psVar);
+    _("T_VALUE %s;", ptValue->tVar.psVar);
+    _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
+    _("%s.iLen = 0;", ptValue->tVar.psVar);
+    _("");
+
+    filedGenCodeParseOnePart(ptValue->tVar.hList, ptOption);
+
+    _("/* [value end] %s */", ptValue->tVar.psVar);
+    _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
     _("");
 }
 
-static void valueValueEndParse(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    _("/* [value end] %s */", ptValue->psValue);
-    _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->psValue, ptValue->psValue);
-    _("");
-}
-
-static void valueNodeQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    _("iRet = %sParse(psBuf, iPos, iMax);", ptValue->psValue);
+    _("iRet = %sParse(psBuf, iPos, iMax);", ptValue->tQuote.psQutoe);
     _("if ( iRet < 0 ) {");
-    _("    return -3;");
+    errorPrintf(ERR_QUORE_PARSE, ptValue, ptOption);
     _("}");
     _("iPos = iRet;");
 }
 
+static void valueAnyParse(T_Value *ptValue, T_Field_Option *ptOption)
+{
+    _("if ( iPos + 1 > iMax ) {");
+    if (ptOption->iLoop) {
+        _("    break;");
+    } else {
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    }
+    _("}");
+    _("iPos += 1;");
+    _("");
+}
+
 static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (NULL == ptValue->psValue) {
-        _("/* [bitmap][%s] . */", ptValue->tBitMap.psLen);
-
-        char sLen[_DLEN_TINY_BUF];
-        if ('$' == ptValue->tBitMap.psLen[0]) {
-            if (!ptOption->iLenInit) {
-                ptOption->iLenInit = 1;
-                _("int iLen = strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tBitMap.psLen+1, ptValue->tBitMap.psLen+1);
-            } else {
-                _("iLen = strStr2Int(Var%s.psValue, Var%s.iLen);", ptValue->tBitMap.psLen+1, ptValue->tBitMap.psLen+1);
-            }
-            sprintf(sLen, "iLen");
-        } else {
-            sprintf(sLen, "%s", ptValue->tBitMap.psLen);
-        }
-
-        _("if ( iPos + %s > iMax ) {", sLen);
-        if (ptOption->iLoop) {
-            _("    break;");
-        } else {
-            errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
-        }
-        _("}");
-        _("iPos += %s;", sLen);
-        _("");
-
-        return;
-    }
-
     unsigned char caFrist;
     unsigned char caLast;
     _("/* [bitmap] %s */", ptValue->tBitMap.psOrg);
@@ -1301,14 +1221,14 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("");
 
     _s();__("if (");
-    if (ptValue->tBitMap.iFlag) {
+    if (ptValue->tBitMap.iNotFlag) {
         __("!(");
     }
 
     int iFlag = 0;
     unsigned int i = 0;
     for (i=1; i<=128; i++) {
-        if (BITMAP_TEST(ptValue->psValue, i)) {
+        if (BITMAP_TEST(ptValue->tBitMap.psBitMap, i)) {
             storeChar(i, NULL, NULL);
         } else {
             storeChar(0, &caFrist, &caLast);
@@ -1318,7 +1238,7 @@ static void valueBitMapParse(T_Value *ptValue, T_Field_Option *ptOption)
     storeChar(0, &caFrist, &caLast);
     printfChar(caFrist, caLast, &iFlag);
 
-    if (ptValue->tBitMap.iFlag) {
+    if (ptValue->tBitMap.iNotFlag) {
         __(")");
     }
 
@@ -1430,36 +1350,37 @@ static int __(char *psBuf, ...)
 	return iRet;
 }
 
+static void valueNullGen(T_Value *ptVcalue, T_Field_Option *ptOption)
+{
+    _("should not have null gen error;");
+}
+
 static void valueStringGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (ptOption->iLoop) {
-        return;
-    }
+    char *psString = ptValue->tString.psString;
+    int iLen = ptValue->tString.iLen;
 
-    _("/* [string] \"%s\" */", ptValue->psValue);
+    _("/* [string] \"%s\" */", psString);
 
-    _("if (iPos + %d > iMax) {", strlen(ptValue->psValue));
+    _("if (iPos + %d > iMax) {", iLen);
     errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
     _("}");
-    if (1 == strlen(ptValue->psValue)) {
-        _("psBuf[iPos] = '%s';", ptValue->psValue);
+
+    if (1 == iLen) {
+        _("psBuf[iPos] = '%s';", psString);
     } else {
-        _("memcpy(psBuf+iPos, \"%s\", %d);", ptValue->psValue, strlen(ptValue->psValue));
+        _("memcpy(psBuf+iPos, \"%s\", %d);", psString, iLen);
     }
-    _("iPos += %d;", strlen(ptValue->psValue));
+    _("iPos += %d;", iLen);
     _("");
 }
 
 static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (ptOption->iLoop) {
-        return;
-    }
-
     _("/* [bitmap] */");
     unsigned int i = 0;
     for (i=1; i<=128; i++) {
-        if (BITMAP_TEST(ptValue->psValue, i)) {
+        if (BITMAP_TEST(ptValue->tBitMap.psBitMap, i)) {
             break;
         }
     }
@@ -1471,7 +1392,7 @@ static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("iPos += 1;");
 }
 
-static void valueNodeStartGen(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
     if (ptOption->iLoop) {
         return;
@@ -1481,8 +1402,15 @@ static void valueNodeStartGen(T_Value *ptValue, T_Field_Option *ptOption)
     char sMin[_DLEN_TINY_BUF];
     char sLoop[_DLEN_TINY_BUF];
     char sRestore[_DLEN_TINY_BUF];
+    int iIndex = ptOption->iLoopIndex;
+    ptOption->iLoopIndex += 1;
 
-    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue);
+    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
+
+    if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
+        fieldGenCodeGenOnePart(ptValue->tNode.hList, ptOption);
+        return;
+    }
 
     _("int %s = iPos;", sRestore);
     _("int %s = 0;", sLoop);
@@ -1505,20 +1433,8 @@ static void valueNodeStartGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("}");
         _("");
     }
-}
 
-static void valueNodeEndGen(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    if (ptOption->iLoop) {
-        return;
-    }
-
-    char sMax[_DLEN_TINY_BUF];
-    char sMin[_DLEN_TINY_BUF];
-    char sLoop[_DLEN_TINY_BUF];
-    char sRestore[_DLEN_TINY_BUF];
-
-    nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue);
+    fieldGenCodeGenOnePart(ptValue->tNode.hList, ptOption);
 
     f_Level -= 1;
     _("}");
@@ -1529,80 +1445,71 @@ static void valueNodeEndGen(T_Value *ptValue, T_Field_Option *ptOption)
     }
 }
 
-static void valueLimitStartGen(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueLimitGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if ('$' == ptValue->tLimit.psMax[0]) {
+    if ('$' == ptValue->tLimit.psLimit[0]) {
         if (!ptOption->iPosTempInit) {
             ptOption->iPosTempInit = 1;
             _("int iPosTemp = iPos;");
         }
         _("iPosTemp = iPos;");
     }
-}
 
-static void valueLimitEndGen(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    if ('$' == ptValue->tLimit.psMax[0]) {
-        _("strInt2Str(iPos-iPosTemp, Var%s.psValue, Var%s.iLen);", ptValue->tLimit.psMax+1, ptValue->tLimit.psMax+1);
+    fieldGenCodeGenOnePart(ptValue->tLimit.hList, ptOption);
+
+    if ('$' == ptValue->tLimit.psLimit[0]) {
+        _("strInt2Str(iPos-iPosTemp, Var%s.psValue, Var%s.iLen);", ptValue->tLimit.psLimit+1, ptValue->tLimit.psLimit+1);
     }
 }
 
 static char * locPrintVar(T_Value *ptValue, char *psVar)
 {
-    if (TYPE_VALUE_START != ptValue->eType) {
+    if (TYPE_VAR != ptValue->eType) {
         return psVar;
     }
 
-    if (0 == strcmp(ptValue->psValue, "Value")) {
-        return ptValue->psValue;
+    if (0 == strcmp(ptValue->tVar.psVar, "Value")) {
+        return ptValue->tVar.psVar;
     }
 
-    if (NULL == psVar && 0 == strcmp(ptValue->psValue, "Var1")) {
-        return ptValue->psValue;
+    if (NULL == psVar && 0 == strcmp(ptValue->tVar.psVar, "Var1")) {
+        return ptValue->tVar.psVar;
     }
 
     return psVar;
 }
 
-static void valueValueStartGen(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    ptOption->iLoop += 1;
-}
-
-static void valueValueEndGen(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    ptOption->iLoop -= 1;
+    _("/* [var start] %s */", ptValue->tVar.psVar);
+    _("T_VALUE %s;", ptValue->tVar.psVar);
+    _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
     _("iRet = getValue(\"%s\", psBuf + iPos, iMax);", ptOption->psName);
     _("if ( iRet < 0 ) {");
     errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
     _("}");
+    _("%s.iLen = iRet;", ptValue->tVar.psVar);
     _("iPos += iRet;");
     _("");
 }
 
-static void valueQuoteStartGen(T_Value *ptValue, T_Field_Option *ptOption)
+static void valueQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    _("/* [quote start] %s */", ptValue->psValue);
-    _("T_VALUE %s;", ptValue->psValue);
-    _("%s.psValue = psBuf+iPos;", ptValue->psValue);
-    _("%s.iLen = 0;", ptValue->psValue);
-    _("");
-}
-
-static void valueQuoteEndGen(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    _("/* [quote end] %s */", ptValue->psValue);
-    _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->psValue, ptValue->psValue);
-    _("");
-}
-
-static void valueNodeQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
-{
-    _("iRet = %sGen(psBuf, iPos, iMax);", ptValue->psValue);
+    _("iRet = %sGen(psBuf, iPos, iMax);", ptValue->tQuote.psQutoe);
     _("if ( iRet < 0 ) {");
-    _("    return -3;");
+    errorPrintf(ERR_QUORE_GEN, ptValue, ptOption);
     _("}");
     _("iPos = iRet;");
+    _("");
+}
+
+static void valueAnyGen(T_Value *ptValue, T_Field_Option *ptOption)
+{
+    _("if ( iPos + 1 > iMax ) {");
+    errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    _("}");
+    _("psBuf[iPos] = '\\0';");
+    _("iPos += 1;");
 }
 
 static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[])
@@ -1678,7 +1585,7 @@ static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
             break;
 
         case ERR_STRING_NOT_SAMLE:
-            __("ERROR at[%%d]: [%%.*s] need [%s]\", iPos, %d, psBuf+iPos);", ptValue->psValue+ptOption->iPreCheck, strlen(ptValue->psValue)-ptOption->iPreCheck);
+            __("ERROR at[%%d]: [%%.*s] need [%s]\", iPos, %d, psBuf+iPos);", ptValue->tString.psString+ptOption->iPreCheck, ptValue->tString.iLen-ptOption->iPreCheck);
             break;
 
         case ERR_BITMAP_NOT_SAMLE:
@@ -1696,6 +1603,14 @@ static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
         case ERR_LOOP_MIN:
             __("ERROR: loop miss\");");
             break;
+
+        case ERR_QUORE_PARSE:
+            __("ERROR: %sParse err[%%d]\", iRet);", ptValue->tQuote.psQutoe);
+            break;
+
+        case ERR_QUORE_GEN:
+            __("ERROR: %sGen err[%%d]\", iRet);", ptValue->tQuote.psQutoe);
+            break;
     }
 
     __("\n");
@@ -1704,13 +1619,13 @@ static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
     return 0;
 }
 
-static char * initInt(int iNum)
+static char * memdup(char *psBuf, int iLen)
 {
-    int iLen = snprintf(NULL, 0, "%d", iNum);
-    char *psVar = malloc(iLen+1);
-    sprintf(psVar, "%d", iNum);
+    char *psReturn = malloc(iLen + 1);
+    memcpy(psReturn, psBuf, iLen);
+    psReturn[iLen] = '\0';
 
-    return psVar;
+    return psReturn;
 }
 
 /*-----------------------------  End ------------------------------------*/
