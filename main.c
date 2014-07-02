@@ -48,6 +48,7 @@ typedef enum {
 
 typedef struct {
     E_TYPE eType;
+    H_LIST hChild;
     union {
         struct {
             char *psBitMap;
@@ -58,15 +59,12 @@ typedef struct {
             char *psMax;
             char *psMin;
             int iNode;
-            H_LIST hList;
         } tNode;
         struct {
             char *psLimit;
-            H_LIST hList;
         } tLimit;
         struct {
             char *psVar;
-            H_LIST hList;
         } tVar;
         struct {
             char *psString;
@@ -137,7 +135,6 @@ static T_Value * valueNewVar(char *psValue, int iLen);
 static T_Value * valueNewString(char *psString, int iLen);
 static T_Value * valueNewBitMap(char *psStart, char *psEnd);
 static T_Value * valueNewQuote(H_LIST hMsgList, char *psStart, char *psEnd);
-static T_Value * valueNewNodeDefault(T_Value *ptValue);
 
 static void valueNullParase(T_Value *ptVcalue, T_Field_Option *ptOption);
 static void valueStringParse(T_Value *ptValue, T_Field_Option *ptOption);
@@ -691,20 +688,12 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
         /*  ) */
         if (')' == *pCur) {
             T_Value *ptValue = listPop(hHeap);
+            ptValue->hChild = hList;
 
             if (TYPE_VAR == ptValue->eType) {
-                ptValue->tVar.hList = hList;
                 pCur += 1;
             } else {
                 pCur = setLoopNode(ptValue, pCur+1);
-                if (TYPE_NULL == ptValue->eType) {
-                    valueNewNodeDefault(ptValue);
-                    ptValue->tNode.hList = hList;
-                } else if ( TYPE_NODE == ptValue->eType ) {
-                    ptValue->tNode.hList = hList;
-                } else if ( TYPE_LIMIT == ptValue->eType ) {
-                    ptValue->tLimit.hList = hList;
-                }
             }
 
             hList = listPop(hHeap);
@@ -760,7 +749,7 @@ static T_Value * valueNewVar(char *psValue, int iLen)
     memcpy(ptValue->tVar.psVar, psValue, iLen);
     ptValue->tVar.psVar[iLen] = '\0';
 
-    ptValue->tVar.hList = listNew();
+    ptValue->hChild = listNew();
 
     return ptValue;
 }
@@ -860,28 +849,13 @@ static T_Value * valueNewQuote(H_LIST hMsgList, char *psStart, char *psEnd)
     return ptValue;
 }
 
-static T_Value * valueNewNodeDefault(T_Value *ptValue)
-{
-    if (NULL == ptValue) {
-        ptValue = valueNew(TYPE_NODE);
-    } else {
-        memset(ptValue, '\0', sizeof(T_Value));
-    }
-
-    ptValue->tNode.hList = listNew();
-    ptValue->tNode.psMax = "1";
-    ptValue->tNode.iNode = 0;
-
-    return ptValue;
-}
-
 static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
 {
     T_Value tNode;
     memset(&tNode, '\0', sizeof(tNode));
 
-    pCur = setLoopNode(&tNode, pCur);
-    if (TYPE_NULL == tNode.eType) {
+    char *pRet = setLoopNode(&tNode, pCur);
+    if (pRet == pCur) {
         listAdd(hList, ptValue);
         return pCur;
     }
@@ -889,48 +863,22 @@ static char * setLoop(T_Value *ptValue, H_LIST hList, char *pCur)
     T_Value *ptNew = valueNew(tNode.eType);
     memcpy(ptNew, &tNode, sizeof(tNode));
 
-    if (TYPE_NODE == ptNew->eType) {
-        ptNew->tNode.hList = listNew();
-        listAdd(ptNew->tNode.hList, ptValue);
-        listAdd(hList, ptNew);
-    }
+    ptNew->hChild = listNew();
+    listAdd(ptNew->hChild, ptValue);
+    listAdd(hList, ptNew);
 
-    if (TYPE_LIMIT == ptNew->eType) {
-        ptNew->tLimit.hList = listNew();
-        listAdd(ptNew->tLimit.hList, ptValue);
-        listAdd(hList, ptNew);
-    }
-
-    return pCur;
+    return pRet;
 }
 
-static char * setLoopNodeQuote(T_Value *ptValue, H_LIST hList, char *pCur)
+static char * setLoopNodeQuote(T_Value *ptQuote, H_LIST hList, char *pCur)
 {
-    T_Value tNode;
-    memset(&tNode, '\0', sizeof(tNode));
+    T_Value *ptNew = valueNew(TYPE_NULL);
 
-    pCur = setLoopNode(&tNode, pCur);
-    if (TYPE_NULL == tNode.eType) {
-        T_Value *ptNew = valueNewNodeDefault(NULL);
-        listAdd(ptNew->tNode.hList, ptValue);
-        listAdd(hList, ptNew);
-        return pCur;
-    }
+    pCur = setLoopNode(ptNew, pCur);
 
-    T_Value *ptNew = valueNew(tNode.eType);
-    memcpy(ptNew, &tNode, sizeof(tNode));
-
-    if (TYPE_NODE == ptNew->eType) {
-        ptNew->tNode.hList = listNew();
-        listAdd(ptNew->tNode.hList, ptValue);
-        listAdd(hList, ptNew);
-    }
-
-    if (TYPE_LIMIT == ptNew->eType) {
-        ptNew->tLimit.hList = listNew();
-        listAdd(ptNew->tLimit.hList, ptValue);
-        listAdd(hList, ptNew);
-    }
+    ptNew->hChild = listNew();
+    listAdd(ptNew->hChild, ptQuote);
+    listAdd(hList, ptNew);
 
     return pCur;
 }
@@ -993,7 +941,10 @@ static char * setLoopNode(T_Value *ptNode, char *psBuf)
         return psEnd + 1;
     }
 
-    ptNode->eType = TYPE_NULL;
+    ptNode->eType = TYPE_NODE;
+    ptNode->tNode.psMax = "1";
+    ptNode->tNode.psMin = NULL;
+
     return psBuf;
 }
 
@@ -1003,6 +954,7 @@ static T_Value * valueNew(E_TYPE eType)
     memset(ptValue, '\0', sizeof(T_Value));
 
     ptValue->eType = eType;
+    ptValue->hChild = NULL;
 
     return ptValue;
 }
@@ -1066,7 +1018,7 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
     nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
 
     if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
-        filedGenCodeParseOnePart(ptValue->tNode.hList, ptOption);
+        filedGenCodeParseOnePart(ptValue->hChild, ptOption);
         return;
     }
 
@@ -1097,7 +1049,7 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    filedGenCodeParseOnePart(ptValue->tNode.hList, ptOption);
+    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
 
     if (NULL != ptValue->tNode.psMin) {
         _("%s = iPos;", sRestore);
@@ -1159,7 +1111,7 @@ static void valueLimitParse(T_Value *ptValue, T_Field_Option *ptOption)
 
     _("");
 
-    filedGenCodeParseOnePart(ptValue->tLimit.hList, ptOption);
+    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
 
     _("if ( iPos != iMax ) {");
     _("    return -2;");
@@ -1176,7 +1128,7 @@ static void valueVarParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("%s.iLen = 0;", ptValue->tVar.psVar);
     _("");
 
-    filedGenCodeParseOnePart(ptValue->tVar.hList, ptOption);
+    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
 
     _("/* [value end] %s */", ptValue->tVar.psVar);
     _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
@@ -1408,7 +1360,7 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
     nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
 
     if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
-        fieldGenCodeGenOnePart(ptValue->tNode.hList, ptOption);
+        fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
         return;
     }
 
@@ -1434,7 +1386,7 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("");
     }
 
-    fieldGenCodeGenOnePart(ptValue->tNode.hList, ptOption);
+    fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
 
     f_Level -= 1;
     _("}");
@@ -1455,7 +1407,7 @@ static void valueLimitGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("iPosTemp = iPos;");
     }
 
-    fieldGenCodeGenOnePart(ptValue->tLimit.hList, ptOption);
+    fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
 
     if ('$' == ptValue->tLimit.psLimit[0]) {
         _("strInt2Str(iPos-iPosTemp, Var%s.psValue, Var%s.iLen);", ptValue->tLimit.psLimit+1, ptValue->tLimit.psLimit+1);
