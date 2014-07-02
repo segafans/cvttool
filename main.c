@@ -173,6 +173,7 @@ static int setOutPutFile(char *psFile);
 static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue, int iIndex);
 static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption);
 static char * memdup(char *psBuf, int iLen);
+static T_Value * fristStringValue(H_LIST hList);
 
 /*-------------------------  Global variable ----------------------------*/
 FNC_PROC f_fncParseDebug[TYPE_NUM] = {
@@ -508,8 +509,8 @@ static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList)
 
 static int getSameNum(T_Field *ptFrist, T_Field *ptSecond)
 {
-    T_Value *ptFristValue = listFrist(ptFrist->hList);
-    T_Value *ptSecodeValue = listFrist(ptSecond->hList);
+    T_Value *ptFristValue = fristStringValue(ptFrist->hList);
+    T_Value *ptSecodeValue = fristStringValue(ptSecond->hList);
 
     int i = 0;
     while (1) {
@@ -524,7 +525,7 @@ static int getSameNum(T_Field *ptFrist, T_Field *ptSecond)
 
 static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField)
 {
-    T_Value *pValue = listFrist(ptField->hList);
+    T_Value *pValue = fristStringValue(ptField->hList);
 
     if (iLast != 0) {
         f_Level -= 1;
@@ -591,10 +592,38 @@ static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck)
 
 static int FiledSort(void *ptFrist, void *ptSecond)
 {
-    T_Value *ptFristValue = listFrist(((T_Field *)ptFrist)->hList);
-    T_Value *ptSecodeValue = listFrist(((T_Field *)ptSecond)->hList);
+    T_Value *ptFristValue = fristStringValue(((T_Field *)ptFrist)->hList);
+    T_Value *ptSecodeValue = fristStringValue(((T_Field *)ptSecond)->hList);
 
     return strcmp(ptFristValue->tVar.psVar, ptSecodeValue->tVar.psVar);
+}
+
+static T_Value * fristStringValue(H_LIST hList)
+{
+    T_Value *ptVar = NULL;
+
+    T_ListIter tListIter;
+    listIterInit(&tListIter, hList);
+    while (1) {
+        T_Value *ptIter = (T_Value *)listIterFetch(&tListIter);
+        if (NULL == ptIter) {
+            break;
+        }
+
+        if (TYPE_STRING == ptIter->eType) {
+            ptVar = ptIter;
+            break;
+        }
+
+        if (NULL != ptIter->hChild) {
+            ptVar = fristStringValue(ptIter->hChild);
+            if (ptVar != NULL) {
+                break;
+            }
+        }
+    }
+
+    return ptVar;
 }
 
 static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
@@ -689,15 +718,14 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
         if (')' == *pCur) {
             T_Value *ptValue = listPop(hHeap);
             ptValue->hChild = hList;
+            hList = listPop(hHeap);
 
             if (TYPE_VAR == ptValue->eType) {
-                pCur += 1;
+                pCur = setLoop(ptValue, hList, pCur+1);
             } else {
                 pCur = setLoopNode(ptValue, pCur+1);
+                listAdd(hList, ptValue);
             }
-
-            hList = listPop(hHeap);
-            listAdd(hList, ptValue);
 
             continue;
         }
@@ -1061,9 +1089,11 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
 
     if (NULL != ptValue->tNode.psMin) {
         ptOption->iLoop -= 1;
-        _("if ( %s < %s ) { ", sLoop, sMin);
-        errorPrintf(ERR_LOOP_MIN, ptValue, ptOption);
-        _("}");
+        if (0 != strcmp("0", sMin)) {
+            _("if ( %s < %s ) { ", sLoop, sMin);
+            errorPrintf(ERR_LOOP_MIN, ptValue, ptOption);
+            _("}");
+        }
         _("iPos = %s;", sRestore);
     }
 }
@@ -1142,6 +1172,7 @@ static void valueQuoteParse(T_Value *ptValue, T_Field_Option *ptOption)
     errorPrintf(ERR_QUORE_PARSE, ptValue, ptOption);
     _("}");
     _("iPos = iRet;");
+    _("");
 }
 
 static void valueAnyParse(T_Value *ptValue, T_Field_Option *ptOption)
@@ -1315,7 +1346,11 @@ static void valueStringGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("/* [string] \"%s\" */", psString);
 
     _("if (iPos + %d > iMax) {", iLen);
-    errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    if (ptOption->iLoop) {
+        _("    break;");
+    } else {
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    }
     _("}");
 
     if (1 == iLen) {
@@ -1330,6 +1365,15 @@ static void valueStringGen(T_Value *ptValue, T_Field_Option *ptOption)
 static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
     _("/* [bitmap] */");
+
+    _("if (iPos + 1 > iMax) {");
+    if (ptOption->iLoop) {
+        _("    break;");
+    } else {
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    }
+    _("}");
+
     unsigned int i = 0;
     for (i=1; i<=128; i++) {
         if (BITMAP_TEST(ptValue->tBitMap.psBitMap, i)) {
@@ -1364,13 +1408,14 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
         return;
     }
 
-    _("int %s = iPos;", sRestore);
     _("int %s = 0;", sLoop);
     if ('$' == ptValue->tNode.psMax[0]) {
         _("for (;;%s++) {", sLoop);
         ptOption->iLoop += 1;
     } else {
+        _("int %s = iPos;", sRestore);
         _("for (;%s<%s;%s++) {", sLoop, sMax, sLoop);
+        ptOption->iLoop += 1;
     }
     f_Level += 1;
 
@@ -1388,8 +1433,23 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
 
     fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
 
+    if ('$' != ptValue->tNode.psMax[0]) {
+        _("%s = iPos;", sRestore);
+    }
+
     f_Level -= 1;
     _("}");
+    _("");
+
+    if ('$' != ptValue->tNode.psMax[0]) {
+        ptOption->iLoop -= 1;
+        if (0 != strcmp("0", sMin)) {
+            _("if ( %s < %s ) { ", sLoop, sMin);
+            errorPrintf(ERR_LOOP_MIN, ptValue, ptOption);
+            _("}");
+        }
+        _("iPos = %s;", sRestore);
+    }
 
     if ('$' == ptValue->tNode.psMax[0]) {
         ptOption->iLoop -= 1;
@@ -1438,7 +1498,11 @@ static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
     _("iRet = getValue(\"%s\", psBuf + iPos, iMax);", ptOption->psName);
     _("if ( iRet < 0 ) {");
-    errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
+    if (ptOption->iLoop) {
+        _("    break;");
+    } else {
+        errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
+    }
     _("}");
     _("%s.iLen = iRet;", ptValue->tVar.psVar);
     _("iPos += iRet;");
@@ -1458,10 +1522,15 @@ static void valueQuoteGen(T_Value *ptValue, T_Field_Option *ptOption)
 static void valueAnyGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
     _("if ( iPos + 1 > iMax ) {");
-    errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    if (ptOption->iLoop) {
+        _("    break;");
+    } else {
+        errorPrintf(ERR_BUFFER_TOO_SMALL, ptValue, ptOption);
+    }
     _("}");
     _("psBuf[iPos] = '\\0';");
     _("iPos += 1;");
+    _("");
 }
 
 static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[])
@@ -1533,35 +1602,35 @@ static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
 
     switch (iType) {
         case ERR_BUFFER_TOO_SMALL:
-            __("ERROR: buffer[%%d] too small\", iMax);");
+            __("ERROR: buffer[%%d] too small\\n\", iMax);");
             break;
 
         case ERR_STRING_NOT_SAMLE:
-            __("ERROR at[%%d]: [%%.*s] need [%s]\", iPos, %d, psBuf+iPos);", ptValue->tString.psString+ptOption->iPreCheck, ptValue->tString.iLen-ptOption->iPreCheck);
+            __("ERROR at[%%d]: [%%.*s] need [%s]\\n\", iPos, %d, psBuf+iPos);", ptValue->tString.psString+ptOption->iPreCheck, ptValue->tString.iLen-ptOption->iPreCheck);
             break;
 
         case ERR_BITMAP_NOT_SAMLE:
-            __("ERROR at[%%d]: [%%c] need [%s]\", iPos, psBuf[iPos]);", ptOption->psName, ptValue->tBitMap.psOrg);
+            __("ERROR at[%%d]: [%%c] need [%s]\\n\", iPos, psBuf[iPos]);", ptOption->psName, ptValue->tBitMap.psOrg);
             break;
 
         case ERR_GET_VALUE:
-            __("ERROR: get value err[%%d]\", iRet);");
+            __("ERROR: get value err[%%d]\\n\", iRet);");
             break;
 
         case ERR_SET_VALUE:
-            __("ERROR: set value err[%%d]\", iRet);");
+            __("ERROR: set value err[%%d]\\n\", iRet);");
             break;
 
         case ERR_LOOP_MIN:
-            __("ERROR: loop miss\");");
+            __("ERROR: loop miss\\n\");");
             break;
 
         case ERR_QUORE_PARSE:
-            __("ERROR: %sParse err[%%d]\", iRet);", ptValue->tQuote.psQutoe);
+            __("ERROR: %sParse err[%%d]\\n\", iRet);", ptValue->tQuote.psQutoe);
             break;
 
         case ERR_QUORE_GEN:
-            __("ERROR: %sGen err[%%d]\", iRet);", ptValue->tQuote.psQutoe);
+            __("ERROR: %sGen err[%%d]\\n\", iRet);", ptValue->tQuote.psQutoe);
             break;
     }
 
