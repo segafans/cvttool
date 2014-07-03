@@ -1090,22 +1090,29 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
 
 static int nodeInfoSet(char *sMax, char *sMin, char *sLoop, char *psRestore, T_Value *ptValue, int iIndex)
 {
+    char sIndex[_DLEN_TINY_BUF];
+    memset(sIndex, '\0', sizeof(sIndex));
+
+    if (iIndex != 0) {
+        sprintf(sIndex, "%d", iIndex);
+    }
+
     if ('$' == ptValue->tNode.psMax[0]) {
-        sprintf(sMax, "iLoopMax%d", iIndex);
+        sprintf(sMax, "iLoopMax%s", sIndex);
     } else {
         sprintf(sMax, "%d", atoi(ptValue->tNode.psMax));
     }
 
     if (NULL != ptValue->tNode.psMin) {
         if ('$' == ptValue->tNode.psMin[0]) {
-            sprintf(sMin, "iLoopMin%d", iIndex);
+            sprintf(sMin, "iLoopMin%s", sIndex);
         } else {
             sprintf(sMin, "%d", atoi(ptValue->tNode.psMin));
         }
     }
 
-    sprintf(sLoop, "iLoop%d", iIndex);
-    sprintf(psRestore, "iRestore%d", iIndex);
+    sprintf(sLoop, "iLoop%s", sIndex);
+    sprintf(psRestore, "iRestore%s", sIndex);
 
     return 0;
 }
