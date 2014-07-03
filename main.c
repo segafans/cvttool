@@ -436,6 +436,8 @@ static int fieldGenCodeGenOne(T_Field *ptField)
     _(" */");
     _("{");
     f_Level += 1;
+
+    LIST_LOOP(ptField->hList, checkHasValue(ptIter, &tOption));
     fieldGenCodeGenOnePart(ptField->hList, &tOption);
     f_Level -= 1;
     _("}");
@@ -690,7 +692,7 @@ static int locParse(char *psBuf, H_LIST hList, H_LIST hMsgList)
                 T_Value *ptVar = valueNewVar(psStart, psEnd-psStart);
                 listPush(hHeap, ptVar);
 
-                pCur +=  3 + (psEnd - psStart) + 1;
+                pCur +=  4 + (psEnd - psStart) + 1;
             } else {
                 /* (?: */
                 T_Value *ptNode = valueNew(TYPE_NULL);
@@ -1402,10 +1404,6 @@ static void valueBitMapGen(T_Value *ptValue, T_Field_Option *ptOption)
 
 static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
 {
-    if (ptOption->iLoopStat) {
-        return;
-    }
-
     char sMax[_DLEN_TINY_BUF];
     char sMin[_DLEN_TINY_BUF];
     char sLoop[_DLEN_TINY_BUF];
@@ -1420,13 +1418,18 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
         return;
     }
 
+    if (NULL != ptValue->tNode.psMin) {
+        _("int %s = iPos;", sRestore);
+    }
+
     _("int %s = 0;", sLoop);
-    if ('$' == ptValue->tNode.psMax[0]) {
+    if ('$' == ptValue->tNode.psMax[0] || '-' == ptValue->tNode.psMax[0]) {
         _("for (;;%s++) {", sLoop);
         ptOption->iLoopStat += 1;
     } else {
-        _("int %s = iPos;", sRestore);
         _("for (;%s<%s;%s++) {", sLoop, sMax, sLoop);
+    }
+    if (NULL != ptValue->tNode.psMin) {
         ptOption->iLoopStat += 1;
     }
     f_Level += 1;
@@ -1445,15 +1448,15 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
 
     fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
 
-    if ('$' != ptValue->tNode.psMax[0]) {
-        _("%s = iPos;", sRestore);
+    if (NULL != ptValue->tNode.psMin) {
+        ptOption->iLoopStat += 1;
     }
 
     f_Level -= 1;
     _("}");
     _("");
 
-    if ('$' != ptValue->tNode.psMax[0]) {
+    if (NULL != ptValue->tNode.psMin) {
         ptOption->iLoopStat -= 1;
         if (0 != strcmp("0", sMin)) {
             _("if ( %s < %s ) { ", sLoop, sMin);
@@ -1510,16 +1513,23 @@ static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption)
     _("/* [var start] %s */", ptValue->tVar.psVar);
     _("T_VALUE %s;", ptValue->tVar.psVar);
     _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
-    _("iRet = getValue(\"%s\", psBuf + iPos, iMax);", ptOption->psName);
-    _("if ( iRet < 0 ) {");
-    if (ptOption->iLoopStat) {
-        _("    break;");
+
+    if (isVarSetValue(ptValue, ptOption)) {
+        _("iRet = getValue(\"%s\", psBuf + iPos, iMax);", ptOption->psName);
+        _("if ( iRet < 0 ) {");
+        if (ptOption->iLoopStat) {
+            _("    break;");
+        } else {
+            errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
+        }
+        _("}");
+        _("%s.iLen = iRet;", ptValue->tVar.psVar);
+        _("iPos += iRet;");
     } else {
-        errorPrintf(ERR_GET_VALUE, ptValue, ptOption);
+        _("%s.iLen = 0;", ptValue->tVar.psVar);
+        fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+        _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
     }
-    _("}");
-    _("%s.iLen = iRet;", ptValue->tVar.psVar);
-    _("iPos += iRet;");
     _("");
 }
 
