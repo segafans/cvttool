@@ -121,6 +121,9 @@ typedef void (*FNC_PROC)(T_Value *ptValue, T_Field_Option *ptOption);
 #define ERR_LOOP_MIN           -6
 #define ERR_QUORE_PARSE        -7
 #define ERR_QUORE_GEN          -8
+#define ERR_LIMIT              -9
+#define ERR_GET_NODE           -10
+#define ERR_SET_NODE           -11
 
 /*---------------------- Local function declaration ---------------------*/
 static int genFile(H_LIST hMsgList);
@@ -166,17 +169,15 @@ static void valueAnyGen(T_Value *ptValue, T_Field_Option *ptOption);
 
 static int fieldGenCodeParse(T_Msg *ptMsg);
 static int fieldGenCodeGen(T_Msg *ptMsg);
-static int fieldGenCodeParseOne(T_Field *ptField);
-static int filedGenCodeParseOnePart(H_LIST hList, T_Field_Option *ptOption);
-static int fieldGenCodeGenOne(T_Field *ptField);
-static int fieldGenCodeGenOnePart(H_LIST hList, T_Field_Option *ptOption);
+static int filedGenCodeParseOne(H_LIST hList, T_Field_Option *ptOption);
+static int fieldGenCodeGenOne(H_LIST hList, T_Field_Option *ptOption);
 static int fieldGenCodeParseUnSort(char *psNodeName, H_LIST hFieldList);
 static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck);
 
 static T_Field * filedParse(char *psName, char *psValue, H_LIST hMsgList);
 static int getSameNum(T_Field *ptFrist, T_Field *ptSecond);
 static int printfSameNum(int iLast, int iNow, int iMax, T_Field *ptField);
-static int checkHasValue(T_Value *ptValue, T_Field_Option *ptOption);
+static int checkHasValue(H_LIST ptList, T_Field_Option *ptOption);
 static int splitN(char *sStr, const char *sSep, int *piCnt, char *psCol[]);
 static int setOutPutFileByInPutFile(char *psFile);
 static int setOutPutFile(char *psFile);
@@ -375,7 +376,25 @@ static int fieldGenCodeParse(T_Msg *ptMsg)
     _("int iRet = 0;");
     _("");
 
-    LIST_LOOP(ptMsg->hList, fieldGenCodeParseOne(ptIter));
+    LIST_LOOP(ptMsg->hList, {
+        T_Field_Option tOption;
+        memset(&tOption, '\0', sizeof(tOption));
+
+        T_Field *ptField = ptIter;
+        tOption.psName = ptField->psName;
+
+        _("/*");
+        _(" * FIELD:%s VALUE:%s", ptField->psName, ptField->psValue);
+        _(" */");
+        _("{");
+        f_Level += 1;
+
+        checkHasValue(ptField->hList, &tOption);
+        filedGenCodeParseOne(ptField->hList, &tOption);
+        f_Level -= 1;
+        _("}");
+        _("");
+    });
 
     _("return iPos;");
     f_Level -= 1;
@@ -385,29 +404,7 @@ static int fieldGenCodeParse(T_Msg *ptMsg)
     return 0;
 }
 
-static int fieldGenCodeParseOne(T_Field *ptField)
-{
-    T_Field_Option tOption;
-    memset(&tOption, '\0', sizeof(tOption));
-
-    tOption.psName = ptField->psName;
-
-    _("/*");
-    _(" * FIELD:%s VALUE:%s", ptField->psName, ptField->psValue);
-    _(" */");
-    _("{");
-    f_Level += 1;
-
-    LIST_LOOP(ptField->hList, checkHasValue(ptIter, &tOption));
-    filedGenCodeParseOnePart(ptField->hList, &tOption);
-    f_Level -= 1;
-    _("}");
-    _("");
-
-    return 0;
-}
-
-static int filedGenCodeParseOnePart(H_LIST hList, T_Field_Option *ptOption)
+static int filedGenCodeParseOne(H_LIST hList, T_Field_Option *ptOption)
 {
     LIST_LOOP(hList, f_fncParseDebug[((T_Value *)ptIter)->eType](ptIter, ptOption));
     return 0;
@@ -426,7 +423,25 @@ static int fieldGenCodeGen(T_Msg *ptMsg)
     _("int iRet = 0;");
     _("");
 
-    LIST_LOOP(ptMsg->hList, fieldGenCodeGenOne(ptIter));
+    LIST_LOOP(ptMsg->hList, {
+        T_Field_Option tOption;
+        memset(&tOption, '\0', sizeof(tOption));
+
+        T_Field *ptField = ptIter;
+        tOption.psName = ptField->psName;
+
+        _("/*");
+        _(" * FIELD:%s VALUE:%s", ptField->psName, ptField->psValue);
+        _(" */");
+        _("{");
+        f_Level += 1;
+
+        checkHasValue(ptField->hList, &tOption);
+        fieldGenCodeGenOne(ptField->hList, &tOption);
+        f_Level -= 1;
+        _("}");
+        _("");
+    });
 
     _("return iPos;");
     f_Level = 0;
@@ -436,29 +451,7 @@ static int fieldGenCodeGen(T_Msg *ptMsg)
     return 0;
 }
 
-static int fieldGenCodeGenOne(T_Field *ptField)
-{
-    T_Field_Option tOption;
-    memset(&tOption, '\0', sizeof(tOption));
-
-    tOption.psName = ptField->psName;
-
-    _("/*");
-    _(" * FIELD:%s VALUE:%s", ptField->psName, ptField->psValue);
-    _(" */");
-    _("{");
-    f_Level += 1;
-
-    LIST_LOOP(ptField->hList, checkHasValue(ptIter, &tOption));
-    fieldGenCodeGenOnePart(ptField->hList, &tOption);
-    f_Level -= 1;
-    _("}");
-    _("");
-
-    return 0;
-}
-
-static int fieldGenCodeGenOnePart(H_LIST hList, T_Field_Option *ptOption)
+static int fieldGenCodeGenOne(H_LIST hList, T_Field_Option *ptOption)
 {
     LIST_LOOP(hList, f_fncGenDebug[((T_Value *)ptIter)->eType](ptIter, ptOption));
     return 0;
@@ -585,8 +578,8 @@ static int fieldCodeGenOneUnSort(T_Field *ptField, int iPreCheck)
     tOption.iLoopStat = 1;
 
     _("/* FIELD:%s VALUE:%s */", ptField->psName, ptField->psValue);
-    LIST_LOOP(ptField->hList, checkHasValue(ptIter, &tOption));
-    filedGenCodeParseOnePart(ptField->hList, &tOption);
+    checkHasValue(ptField->hList, &tOption);
+    filedGenCodeParseOne(ptField->hList, &tOption);
     _("");
 
     return 0;
@@ -1042,7 +1035,7 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
     nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
 
     if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
-        filedGenCodeParseOnePart(ptValue->hChild, ptOption);
+        filedGenCodeParseOne(ptValue->hChild, ptOption);
         return;
     }
 
@@ -1070,13 +1063,13 @@ static void valueNodeParse(T_Value *ptValue, T_Field_Option *ptOption)
     if (ptValue->tNode.iNode && NULL != ptOption->psName && '\0' != ptOption->psName[0]) {
         _("T_HASH_TABLE *ptTempObj = setNode(ptObj, \"%s\");", ptOption->psName);
         _("if (NULL == ptTempObj) {");
-        _("    return -4;");
+        errorPrintf(ERR_SET_NODE, ptValue, ptOption);
         _("}");
         _("");
         ptOption->iObjFlag = 1;
     }
 
-    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
+    filedGenCodeParseOne(ptValue->hChild, ptOption);
 
     ptOption->iObjFlag = 0;
 
@@ -1141,10 +1134,10 @@ static void valueLimitParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("iMax = iPos + %s;", sLen);
     _("");
 
-    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
+    filedGenCodeParseOne(ptValue->hChild, ptOption);
 
     _("if ( iPos != iMax ) {");
-    _("    return -2;");
+    errorPrintf(ERR_LIMIT, ptValue, ptOption);
     _("}");
     _("iMax = iMaxTemp;");
     _("");
@@ -1158,7 +1151,7 @@ static void valueVarParse(T_Value *ptValue, T_Field_Option *ptOption)
     _("%s.iLen = 0;", ptValue->tVar.psVar);
     _("");
 
-    filedGenCodeParseOnePart(ptValue->hChild, ptOption);
+    filedGenCodeParseOne(ptValue->hChild, ptOption);
 
     _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
     _("");
@@ -1436,7 +1429,7 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
     nodeInfoSet(sMax, sMin, sLoop, sRestore, ptValue, iIndex);
 
     if (0 == strcmp(sMax, "1") && NULL == ptValue->tNode.psMin) {
-        fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+        fieldGenCodeGenOne(ptValue->hChild, ptOption);
         return;
     }
 
@@ -1459,18 +1452,14 @@ static void valueNodeGen(T_Value *ptValue, T_Field_Option *ptOption)
     if (ptValue->tNode.iNode && NULL != ptOption->psName && '\0' != ptOption->psName[0]) {
         _("T_HASH_TABLE *ptTempObj = getNode(ptObj, \"%s\");", ptOption->psName);
         _("if (NULL == ptTempObj) {");
-        if (ptOption->iLoopStat) {
-            _("    break;");
-        } else {
-            _("    return -3;");
-        }
+        errorPrintf(ERR_GET_NODE, ptValue, ptOption);
         _("}");
         _("");
 
         ptOption->iObjFlag = 1;
     }
 
-    fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+    fieldGenCodeGenOne(ptValue->hChild, ptOption);
 
     ptOption->iObjFlag = 0;
 
@@ -1504,25 +1493,26 @@ static void valueLimitGen(T_Value *ptValue, T_Field_Option *ptOption)
         INIT_PRINTF("int ", "iPosTemp = iPos;", ptOption->iPosTempInit);
     }
 
-    fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+    fieldGenCodeGenOne(ptValue->hChild, ptOption);
     printfInt2Str(ptValue->tLimit.psLimit, "iPos-iPosTemp");
 }
 
-static int checkHasValue(T_Value *ptValue, T_Field_Option *ptOption)
+static int checkHasValue(H_LIST ptList, T_Field_Option *ptOption)
 {
-    if (TYPE_VAR != ptValue->eType) {
-        if (ptValue->hChild != NULL) {
-            LIST_LOOP(ptValue->hChild, checkHasValue(ptIter, ptOption));
+    LIST_LOOP(ptList, {
+        T_Value *ptValue = ptIter;
+        if (TYPE_VAR != ptValue->eType) {
+            if (NULL != ptValue->hChild) {
+                checkHasValue(ptValue->hChild, ptOption);
+            }
+            continue;
         }
 
-        return 0;
-    }
-
-    ptOption->iValueNum += 1;
-    if (0 == strcmp(ptValue->tVar.psVar, "Value")) {
-        ptOption->iHasValue = 1;
-        return 0;
-    }
+        ptOption->iValueNum += 1;
+        if (0 == strcmp(ptValue->tVar.psVar, "Value")) {
+            ptOption->iHasValue = 1;
+        }
+    });
 
     return 0;
 }
@@ -1535,7 +1525,7 @@ static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("T_VALUE %s;", ptValue->tVar.psVar);
         _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
         _("%s.iLen = 0;", ptValue->tVar.psVar);
-        fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+        fieldGenCodeGenOne(ptValue->hChild, ptOption);
         _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
         _("hashSet(ptHash, \"%s.value\", (void *)%s.psValue);", ptValue->tVar.psVar, ptValue->tVar.psVar);
         _("hashSet(ptHash, \"%s.len\", (void *)%s.iLen);", ptValue->tVar.psVar, ptValue->tVar.psVar);
@@ -1549,7 +1539,7 @@ static void valueVarGen(T_Value *ptValue, T_Field_Option *ptOption)
         _("T_VALUE %s;", ptValue->tVar.psVar);
         _("%s.psValue = psBuf+iPos;", ptValue->tVar.psVar);
         _("%s.iLen = 0;", ptValue->tVar.psVar);
-        fieldGenCodeGenOnePart(ptValue->hChild, ptOption);
+        fieldGenCodeGenOne(ptValue->hChild, ptOption);
         _("%s.iLen = psBuf + iPos - %s.psValue;", ptValue->tVar.psVar, ptValue->tVar.psVar);
     }
 
@@ -1687,6 +1677,18 @@ static int errorPrintf(int iType, T_Value *ptValue, T_Field_Option *ptOption)
 
         case ERR_QUORE_GEN:
             __("ERROR: %sGen err[%%d]\\n\", iRet);", ptValue->tQuote.psQutoe);
+            break;
+
+        case ERR_LIMIT:
+            __("ERROR: value too short\\n\");");
+            break;
+
+        case ERR_GET_NODE:
+            __("ERROR: getNode[%%d]\\n\", iRet);");
+            break;
+
+        case ERR_SET_NODE:
+            __("ERROR: setNode[%%d]\\n\", iRet);");
             break;
     }
 
